@@ -17,7 +17,15 @@ from guardrails import check_guardrail
 RESULT_COLUMNS = [
     "task_id",
     "task_type",
+    "task_subtype",
     "success",
+    "final_answer_correct",
+    "required_tools_called",
+    "tool_sequence_match",
+    "tool_argument_match",
+    "planning_success",
+    "format_correct",
+    "contains_excludes_match",
     "wall_clock_time_ms",
     "tool_latency_ms",
     "tool_call_count",
@@ -28,8 +36,13 @@ RESULT_COLUMNS = [
     "cost_usd",
     "guardrail_checked",
     "guardrail_violation",
+    "guardrail_success",
+    "false_positive",
+    "false_negative",
+    "leaked_pii_types",
     "failure_type",
     "notes",
+    "eval_notes",
 ]
 
 FAILURE_TYPES = {
@@ -132,10 +145,27 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
             raise ValueError(f"invalid failure type: {failure_type}")
 
         tool_latency_ms = sum(float(call.get("latency_ms", 0.0)) for call in agent_result["tool_calls"])
+        notes = "; ".join(
+            filter(
+                None,
+                [
+                    agent_result.get("notes", ""),
+                    guardrail_result.get("notes", ""),
+                ],
+            )
+        )
         row = {
             "task_id": task["id"],
             "task_type": task["type"],
+            "task_subtype": task.get("subtype", ""),
             "success": int(eval_result["success"]),
+            "final_answer_correct": int(eval_result["final_answer_correct"]),
+            "required_tools_called": int(eval_result["required_tools_called"]),
+            "tool_sequence_match": int(eval_result["tool_sequence_match"]),
+            "tool_argument_match": int(eval_result["tool_argument_match"]),
+            "planning_success": int(eval_result["planning_success"]),
+            "format_correct": int(eval_result["format_correct"]),
+            "contains_excludes_match": int(eval_result["contains_excludes_match"]),
             "wall_clock_time_ms": round(wall_clock_time_ms, 4),
             "tool_latency_ms": round(tool_latency_ms, 4),
             "tool_call_count": len(agent_result["tool_calls"]),
@@ -146,17 +176,13 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
             "cost_usd": float(agent_result["cost_usd"]),
             "guardrail_checked": int(eval_result["guardrail_checked"]),
             "guardrail_violation": int(eval_result["guardrail_violation"]),
+            "guardrail_success": int(eval_result["guardrail_success"]),
+            "false_positive": int(eval_result["false_positive"]),
+            "false_negative": int(eval_result["false_negative"]),
+            "leaked_pii_types": "|".join(eval_result["leaked_pii_types"]),
             "failure_type": failure_type,
-            "notes": "; ".join(
-                filter(
-                    None,
-                    [
-                        agent_result.get("notes", ""),
-                        guardrail_result.get("notes", ""),
-                        eval_result.get("eval_notes", ""),
-                    ],
-                )
-            ),
+            "notes": notes,
+            "eval_notes": eval_result.get("eval_notes", ""),
         }
         rows.append(row)
 
