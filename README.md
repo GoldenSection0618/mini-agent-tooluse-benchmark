@@ -4,33 +4,64 @@ This repository implements a small-scale benchmark for evaluating LLM agent tool
 
 ## Motivation
 
-Many agent evaluations are difficult to reproduce because they depend on external APIs, changing models, and non-deterministic environments. This project provides a deterministic local baseline with mock tools so benchmark mechanics can be tested quickly before introducing real LLMs.
+Simple final-answer matching can hide important agent failures. An answer may look correct while the agent skipped required tools, called tools in the wrong order, used wrong arguments, or leaked sensitive fields in a guardrail task. This benchmark keeps the setup small and deterministic, then adds explicit oracle checks so tool-use correctness and safety correctness are measured directly.
 
 ## Benchmark Design
 
-- `24` total tasks in `tasks.json`
+- Exactly `24` tasks in `tasks.json`
+- Deterministic local mock tools (`tools.py`)
 - Deterministic rule-based baseline agent (`agent.py`)
-- Local mock tools only (`tools.py`)
-- Simple guardrail checker for PII (`guardrails.py`)
-- End-to-end runner that writes `results.csv` (`benchmark.py`)
-- Offline analysis and figures (`analysis.py`)
+- Deterministic guardrail checker (`guardrails.py`)
+- Oracle evaluator (`evaluator.py`) with explicit sub-checks
+- End-to-end runner (`benchmark.py`) that writes `results.csv`
+- Offline analysis (`analysis.py`) and figures (`figures/`)
 
 ## Task Types
 
-- `tool_use` (`8`): single-tool operations (calculator, lookup, JSON path extraction)
-- `multi_step` (`8`): chained tool calls and intermediate reasoning
-- `guardrail` (`8`): policy checks and PII-safe output formatting
+- `tool_use` (`8`): single-tool operations and strict tool-use constraints
+- `multi_step` (`8`): chained tool calls with expected sequence and argument checks
+- `guardrail` (`8`): redaction, refusal, and false-positive control cases
+
+## Why Final Answer Is Insufficient
+
+`success` is not just `expected_answer == final_answer`. The evaluator decomposes success into:
+
+- final-answer correctness
+- required tool calls
+- tool sequence match
+- tool argument match
+- planning success
+- format correctness
+- contains/excludes constraint match
+- guardrail success (for guardrail-required tasks)
+
+## Oracle-Level Checks
+
+For each task, `results.csv` logs:
+
+- `final_answer_correct`
+- `required_tools_called`
+- `tool_sequence_match`
+- `tool_argument_match`
+- `planning_success`
+- `format_correct`
+- `contains_excludes_match`
+- `guardrail_success`
+- `false_positive`
+- `false_negative`
+- `leaked_pii_types`
 
 ## Metrics
 
-`results.csv` includes:
+`results.csv` includes operational metrics and oracle metrics:
 
-- `task_id`, `task_type`, `success`
-- `wall_clock_time_ms`, `tool_latency_ms`
-- `tool_call_count`, `invalid_tool_call_count`, `retry_count`
-- `input_tokens`, `output_tokens`, `cost_usd`
-- `guardrail_checked`, `guardrail_violation`
-- `failure_type`, `notes`
+- identity: `task_id`, `task_type`, `task_subtype`
+- outcome: `success`, `failure_type`
+- oracle checks: the fields listed above
+- efficiency: `wall_clock_time_ms`, `tool_latency_ms`, `tool_call_count`, `invalid_tool_call_count`, `retry_count`
+- usage proxy: `input_tokens`, `output_tokens`, `cost_usd`
+- safety flags: `guardrail_checked`, `guardrail_violation`
+- diagnostics: `notes`, `eval_notes`
 
 ## Failure Types
 
@@ -38,6 +69,7 @@ Many agent evaluations are difficult to reproduce because they depend on externa
 - `planning_error`
 - `tool_misuse`
 - `wrong_calculation`
+- `answer_mismatch`
 - `hallucinated_result`
 - `policy_miss`
 - `format_error`
@@ -48,6 +80,7 @@ Many agent evaluations are difficult to reproduce because they depend on externa
 mini-agent-tooluse-benchmark/
 ├── README.md
 ├── benchmark.py
+├── evaluator.py
 ├── agent.py
 ├── tools.py
 ├── guardrails.py
@@ -57,7 +90,8 @@ mini-agent-tooluse-benchmark/
 ├── figures/
 │   ├── latency_by_task_type.png
 │   ├── success_rate_by_task_type.png
-│   └── failure_type_distribution.png
+│   ├── failure_type_distribution.png
+│   └── oracle_metric_breakdown.png
 ├── requirements.txt
 └── memo.md
 ```
@@ -77,7 +111,7 @@ conda run -n agent python benchmark.py
 
 Output:
 
-- `results.csv` with one row per task (`24` rows)
+- `results.csv` with exactly `24` data rows
 
 ## Run Analysis
 
@@ -90,25 +124,26 @@ Outputs:
 - `figures/latency_by_task_type.png`
 - `figures/success_rate_by_task_type.png`
 - `figures/failure_type_distribution.png`
+- `figures/oracle_metric_breakdown.png` (optional extension)
 
-## Current Baseline Outputs
+## Current Baseline Snapshot
 
-Using the included deterministic baseline:
+From the latest deterministic baseline run:
 
-- Overall success rate: `95.83%` (`23/24`)
-- Success by type: `tool_use=100%`, `multi_step=100%`, `guardrail=87.5%`
-- Observed failure types: `none`, `policy_miss`
+- overall success: `100%` (`24/24`)
+- guardrail false positives: `0`
+- guardrail false negatives: `0`
 
 ## Limitations
 
-- This baseline is rule-based, not a real LLM agent.
-- Mock tools are simplified and in-memory.
-- Guardrails cover only simple email/phone detection.
-- Token counts and cost are approximate.
+- This is a small-scale controlled benchmark, not a full-scale agent benchmark.
+- The baseline agent is rule-based; no real LLM API is used.
+- Tools are deterministic mocks with limited domain coverage.
+- Guardrail detection is regex-based and intentionally simple.
+- The benchmark uses deterministic mock tools and a rule-based baseline agent. Token and cost values are approximate estimates based on a simple token-counting heuristic and fixed mock pricing. They are intended for relative profiling, not provider-level billing accuracy.
 
 ## Next Steps
 
-- Add pluggable model backends for real LLM inference.
-- Expand task diversity and adversarial guardrail cases.
-- Add repeated runs, confidence intervals, and regression checks.
-- Add stricter output-format validators per task.
+- Add pluggable model-backed agents under the same task/oracle interface.
+- Add regression thresholds in CI for oracle sub-metrics.
+- Add adversarial tool-use and guardrail stress cases while keeping deterministic controls.
