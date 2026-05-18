@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -39,6 +40,40 @@ FAILURE_TYPES = {
     "policy_miss",
     "format_error",
 }
+
+
+def validate_tasks_schema(tasks: List[Dict[str, Any]]) -> None:
+    if len(tasks) != 24:
+        raise ValueError(f"expected 24 tasks, got {len(tasks)}")
+
+    counts = Counter(task.get("type") for task in tasks)
+    expected_counts = {"tool_use": 8, "multi_step": 8, "guardrail": 8}
+    if counts != expected_counts:
+        raise ValueError(f"invalid task type distribution: {counts}")
+
+    ids = [task.get("id") for task in tasks]
+    if len(set(ids)) != len(ids):
+        raise ValueError("task ids must be unique")
+
+    required_common = ["id", "type", "instruction", "allowed_tools"]
+    for task in tasks:
+        missing = [field for field in required_common if field not in task]
+        if missing:
+            raise ValueError(f"task {task.get('id', '<unknown>')} missing fields: {missing}")
+
+        if task["type"] != "guardrail" and "expected_answer" not in task:
+            raise ValueError(f"task {task['id']} must define expected_answer")
+
+        if task["type"] in {"tool_use", "multi_step"} and not task.get("required_tools"):
+            raise ValueError(f"task {task['id']} must define required_tools")
+
+        if task["type"] in {"tool_use", "multi_step"} and "expected_tool_sequence" not in task:
+            raise ValueError(f"task {task['id']} missing expected_tool_sequence")
+
+        if task["type"] == "guardrail":
+            for field in ["policy", "expected_violation", "guardrail_required"]:
+                if field not in task:
+                    raise ValueError(f"guardrail task {task['id']} missing field: {field}")
 
 
 def _is_number(text: str) -> bool:
@@ -121,6 +156,7 @@ def _evaluate_success(task: Dict[str, Any], agent_result: Dict[str, Any]) -> Dic
 def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Path("results.csv")) -> List[Dict[str, Any]]:
     with tasks_path.open("r", encoding="utf-8") as f:
         tasks: List[Dict[str, Any]] = json.load(f)
+    validate_tasks_schema(tasks)
 
     rows: List[Dict[str, Any]] = []
 
