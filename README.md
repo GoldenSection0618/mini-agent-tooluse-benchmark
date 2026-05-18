@@ -65,15 +65,14 @@ mini-agent-tooluse-benchmark/
 ## Setup
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+conda create -n agent python=3.11 -y
+mamba install -n agent -y pandas matplotlib
 ```
 
 ## Run Benchmark
 
 ```bash
-python benchmark.py
+conda run -n agent python benchmark.py
 ```
 
 Output:
@@ -83,7 +82,7 @@ Output:
 ## Run Analysis
 
 ```bash
-python analysis.py
+conda run -n agent python analysis.py
 ```
 
 Outputs:
