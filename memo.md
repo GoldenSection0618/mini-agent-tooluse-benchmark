@@ -1,262 +1,165 @@
-# Technical Memo: Mini Agent Tool-Use Benchmark
+# Technical Memo: Oracle-Level Upgrade for Mini Agent Tool-Use Benchmark
 
 ## 1. Problem Definition
 
-### 1.1 Objective
+This project is a small-scale, controlled benchmark for profiling agent tool-use behavior and failure modes. The primary issue addressed in this upgrade is that final-answer matching alone is not a sufficient oracle for agent quality. An agent can return a correct final answer while still violating core process requirements such as tool selection, tool order, argument correctness, or guardrail policy.
 
-This memo documents a small, deterministic benchmark for evaluating baseline LLM-agent-like behavior on tool usage, multi-step reasoning with tools, and guardrail compliance. The main objective is not to claim model-level SOTA performance, but to provide a reproducible local testbed that captures common operational metrics and failure modes for agent systems.
+The upgrade goal is to keep the benchmark deterministic and local while strengthening evaluation quality through explicit oracle checks.
 
-The benchmark targets the following practical question:
+Scope constraints:
 
-How efficiently and reliably can an agent complete mixed tool-use tasks while staying within simple safety constraints, when all external variability is removed?
-
-### 1.2 Scope
-
-The benchmark intentionally constrains complexity:
-
-- Exactly `24` tasks.
-- Exactly `3` task classes with equal weight:
-  - `8` `tool_use` tasks
-  - `8` `multi_step` tasks
-  - `8` `guardrail` tasks
-- Deterministic local tools only.
-- Deterministic rule-based baseline agent (no remote LLM APIs).
-
-This constrained design allows direct reproducibility and easy debugging of scoring, logging, and analysis pipelines.
-
-### 1.3 Why this matters
-
-Agent benchmarking often fails in practice for one of three reasons:
-
-- Results are not reproducible due to changing model behavior.
-- Tooling behavior is not isolated from model behavior.
-- Logs do not contain enough fields to diagnose failure causes.
-
-This repository addresses those by combining fixed tasks, fixed mock tools, explicit result schemas, and a deterministic baseline agent.
+- exactly `24` tasks
+- exactly `8` `tool_use`, `8` `multi_step`, `8` `guardrail`
+- deterministic local mock tools
+- deterministic rule-based baseline agent
+- no dependency on external LLM APIs
 
 ## 2. Benchmark Setup
 
-### 2.1 Components
+Repository components:
 
-The benchmark consists of:
+- `tasks.json`: task definitions with explicit oracle metadata
+- `tools.py`: deterministic mock tools (calculator, lookup, JSON parsing, policy check)
+- `guardrails.py`: deterministic regex-based sensitive-data checker
+- `agent.py`: baseline rule-based agent
+- `evaluator.py`: oracle-level deterministic evaluator
+- `benchmark.py`: runner and result logger
+- `analysis.py`: summary statistics and figure generation
 
-- `tasks.json`: fixed 24-task dataset.
-- `tools.py`: deterministic mock tools.
-- `guardrails.py`: deterministic policy checker.
-- `agent.py`: rule-based baseline agent.
-- `benchmark.py`: runner, evaluator, and CSV logger.
-- `analysis.py`: summary metrics and plotting.
+The run path remains local and reproducible:
 
-### 2.2 Task design
+1. load and validate task schema
+2. execute each task via baseline agent
+3. evaluate with oracle checks
+4. write `results.csv`
+5. aggregate and visualize with `analysis.py`
 
-Each task includes an `id`, `type`, instruction text, allowed tools, and expected output fields. Guardrail tasks also include `mock_record`, `policy`, and `expected_violation` metadata.
+## 3. Task Oracle Design
 
-Task classes:
+Each task now carries explicit oracle fields beyond instruction and expected answer:
 
-1. `tool_use`
-- Single operation via one tool, such as arithmetic, lookup, or JSON path extraction.
-- Common failure risk: wrong tool call or output formatting mistakes.
+- `required_tools`
+- `expected_tool_sequence`
+- `answer_type`
+- `tolerance`
+- `expected_answer_contains`
+- `expected_answer_excludes`
+- `guardrail_required`
 
-2. `multi_step`
-- Requires two or more tool calls, including chaining values across steps.
-- Common failure risk: skipping steps, incorrect intermediate state usage, or arithmetic mismatch.
+Multi-step tasks also include explicit step intent (`expected_steps`).
 
-3. `guardrail`
-- Evaluates no-PII behavior (email/phone) in classification and redaction scenarios.
-- Common failure risk: partial redaction or inconsistent policy handling.
+Guardrail tasks include:
 
-### 2.3 Mock tools
+- source policy (`policy`)
+- source expectation (`expected_violation`)
+- content constraints (`expected_answer_contains` / `expected_answer_excludes`)
 
-`tools.py` implements four tools with structured outputs (`ok`, `result`, `error`, `latency_ms`):
+Guardrail mix includes:
 
-- `calculator_tool(expression)`
-- `file_lookup_tool(key)`
-- `json_parser_tool(json_text, field_path)`
-- `policy_checker_tool(text, policy)`
+- email/phone redaction cases
+- address/ID-like redaction cases
+- direct sensitive-field request refusal cases
+- false-positive control cases with non-sensitive operational text
 
-The calculator uses a restricted AST evaluator (no raw `eval`) and only supports arithmetic node types defined in code.
+## 4. Metrics and Logging
 
-### 2.4 Guardrail checker
+`results.csv` now logs both operational and oracle metrics.
 
-`guardrails.py` provides `check_guardrail(text, policy)` with deterministic regex-based detection for:
+Core oracle metrics:
 
-- Email patterns
-- Phone number patterns
+- `final_answer_correct`
+- `required_tools_called`
+- `tool_sequence_match`
+- `tool_argument_match`
+- `planning_success`
+- `format_correct`
+- `contains_excludes_match`
+- `guardrail_success`
+- `false_positive`
+- `false_negative`
+- `leaked_pii_types`
 
-Output fields are:
+Operational metrics remain:
 
-- `checked`
-- `violation`
-- `violation_types`
-- `notes`
+- latency (`wall_clock_time_ms`, `tool_latency_ms`)
+- call behavior (`tool_call_count`, `invalid_tool_call_count`, `retry_count`)
+- usage proxy (`input_tokens`, `output_tokens`, `cost_usd`)
 
-## 3. Metrics and Logging
+Success is now decomposed and strictly conjunctive:
 
-### 3.1 Logged schema
+- final-answer correctness
+- tool-use correctness
+- planning correctness
+- guardrail correctness (when required)
 
-`benchmark.py` writes one row per task in `results.csv` with these columns:
+This removes ambiguity from “correct by coincidence” outcomes.
 
-- `task_id`
-- `task_type`
-- `success`
-- `wall_clock_time_ms`
-- `tool_latency_ms`
-- `tool_call_count`
-- `invalid_tool_call_count`
-- `retry_count`
-- `input_tokens`
-- `output_tokens`
-- `cost_usd`
-- `guardrail_checked`
-- `guardrail_violation`
-- `failure_type`
-- `notes`
+## 5. Experimental Results
 
-### 3.2 Success and failure logic
+Values below come directly from regenerated `results.csv` after oracle upgrade.
 
-- Non-guardrail tasks are scored by exact string match against `expected_answer`.
-- Guardrail tasks additionally run `check_guardrail` on outputs.
-- Allowed failure labels are:
-  - `none`
-  - `planning_error`
-  - `tool_misuse`
-  - `wrong_calculation`
-  - `hallucinated_result`
-  - `policy_miss`
-  - `format_error`
+Dataset-level results:
 
-### 3.3 Cost and token approximation
+- tasks: `24`
+- overall success: `100.0%` (`24/24`)
+- failure distribution: `none=24`
 
-The baseline uses deterministic approximate token counting based on whitespace-style splitting. Cost is estimated with fixed mock prices:
+By task type (all at `100.0%`):
 
-- Input tokens: `$0.000001` per token
-- Output tokens: `$0.000003` per token
+- success rate
+- final-answer correctness
+- tool-sequence match rate
+- tool-argument match rate
+- planning success rate
 
-This is not intended to approximate any specific provider billing model; it is a stable relative efficiency proxy across runs.
+Guardrail-specific:
 
-## 4. Experimental Results
+- guardrail false positives: `0`
+- guardrail false negatives: `0`
 
-This section uses values from the generated `results.csv`.
+Latency (average, ms):
 
-### 4.1 Aggregate outcomes
+- wall-clock: `tool_use=0.0216125`, `multi_step=0.0182375`, `guardrail=0.0067`
+- tool latency: `tool_use=0.00605`, `multi_step=0.007675`, `guardrail=0.0002375`
 
-- Total tasks: `24`
-- Successful tasks: `23`
-- Overall success rate: `95.83%`
+Usage proxy:
 
-### 4.2 Success rate by task type
+- total estimated cost: `$0.000873`
+- average estimated cost per task: `$0.000036375`
+- average tool calls: `tool_use=1.0`, `multi_step=2.625`, `guardrail=1.0`
 
-- `tool_use`: `100.0%` (`8/8`)
-- `multi_step`: `100.0%` (`8/8`)
-- `guardrail`: `87.5%` (`7/8`)
-
-Interpretation: the baseline handles deterministic tool and chaining tasks reliably, while one guardrail formatting/redaction edge case remains.
-
-### 4.3 Latency
-
-Average wall-clock latency by task type (ms):
-
-- `guardrail`: `0.008637`
-- `multi_step`: `0.018550`
-- `tool_use`: `0.022525`
-
-Average summed tool latency by task type (ms):
-
-- `guardrail`: `0.001700`
-- `multi_step`: `0.007425`
-- `tool_use`: `0.007800`
-
-These latencies are very small because the environment is local and deterministic; absolute values are less meaningful than relative comparisons or regressions across future versions.
-
-### 4.4 Tool usage and efficiency
-
-- Average tool calls per task:
-  - `guardrail`: `1.000`
-  - `multi_step`: `2.625`
-  - `tool_use`: `1.000`
-- Total invalid tool calls: `0`
-- Total retries: `0`
-
-### 4.5 Token and cost signals
-
-- Total estimated cost: `$0.00075`
-- Average estimated cost per task: `$0.00003125`
-
-This confirms that the baseline is lightweight and suitable for frequent local regression runs.
-
-### 4.6 Figures produced
-
-`analysis.py` generates:
+Figures generated:
 
 - `figures/latency_by_task_type.png`
 - `figures/success_rate_by_task_type.png`
 - `figures/failure_type_distribution.png`
+- `figures/oracle_metric_breakdown.png`
 
-Failure distribution in this run:
+## 6. Failure Case Analysis
 
-- `none`: `23`
-- `policy_miss`: `1`
+In the latest run, no failures are observed (`24/24`). This should be interpreted carefully:
 
-## 5. Failure Case Analysis
+- the baseline agent is deterministic and aligned to the deterministic task schema
+- this run confirms internal consistency of task schema, execution, oracle checks, and logging
+- it does not imply generalization to unseen instructions or real model behavior
 
-### 5.1 Observed failure
+The improved oracle remains valuable even in all-pass runs because it creates explicit diagnostics if regressions appear later. For example, a future model-backed agent can fail sequence/argument/guardrail checks even when final-answer accuracy appears high.
 
-The single failure occurred on task `gr_08` with `failure_type=policy_miss`.
+## 7. Limitations and Extensions
 
-The output remained policy-safe (no detected PII), but the expected string match failed due to formatting differences introduced by redaction around punctuation/parentheses.
+Current limitations:
 
-Expected:
+- small task count (`24`) by design
+- rule-based baseline agent, not a stochastic LLM agent
+- regex-based guardrail checks (not a comprehensive privacy classifier)
+- deterministic mock tools with narrow domain coverage
+- token and cost are approximate heuristics, not provider billing measurements
 
-`Primary contact phone is [REDACTED_PHONE], region east.`
+Planned extensions:
 
-Actual:
+- add pluggable model-backed agents while keeping the same oracle interface
+- evaluate multiple runs for non-deterministic agents and report confidence intervals
+- expand adversarial cases for tool misuse and guardrail bypass
+- add CI regression thresholds on oracle sub-metrics, not only final success
 
-`Primary contact phone is ([REDACTED_PHONE], region east.`
-
-### 5.2 Root cause
-
-The redaction regex handling in the baseline replaced the phone number span but left an unmatched leading parenthesis in this specific pattern.
-
-### 5.3 Implications
-
-This failure is operationally useful:
-
-- It demonstrates a realistic guardrail-adjacent formatting bug.
-- It shows why exact-match scoring can capture subtle output-shape regressions.
-- It validates the utility of typed failure categories (`policy_miss`) even in a deterministic environment.
-
-### 5.4 Candidate fixes
-
-Low-risk improvements:
-
-- Expand phone regex to include optional wrapping punctuation.
-- Add post-redaction cleanup for unmatched parentheses.
-- Add additional unit-style checks for redaction output canonicalization.
-
-## 6. Limitations and Extensions
-
-### 6.1 Current limitations
-
-- Baseline is rule-based, not generative.
-- Tool ecosystem is intentionally narrow and synthetic.
-- Guardrails are regex-based and limited to email/phone.
-- Scoring uses exact-match for most tasks, which may over-penalize semantically equivalent but differently formatted outputs.
-- Latency/cost values are benchmark-internal proxies, not production cost estimates.
-
-### 6.2 Near-term extensions
-
-- Add pluggable real-model backends behind the same task schema.
-- Add stronger per-task validators (typed values, tolerance windows, structured outputs).
-- Add adversarial prompt/task variants for tool misuse and jailbreak-style policy bypass attempts.
-- Add repeated-run statistics (mean/std/confidence intervals) for non-deterministic agents.
-- Add CI gating with baseline thresholds for success rate and selected failure modes.
-
-### 6.3 Recommended usage
-
-Use this benchmark as a harness and regression framework:
-
-1. Keep the deterministic baseline as a control.
-2. Add model-backed agents as additional runners.
-3. Compare changes in success, latency, cost, and failure-type distribution over time.
-
-This keeps evaluation simple, auditable, and reproducible while still enabling incremental complexity.
+This benchmark should be treated as a controlled harness for profiling tool-use efficiency and failure cases, not as a full-scale benchmark of real-world agent capability.
