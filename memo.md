@@ -119,8 +119,8 @@ Guardrail-specific:
 
 Latency (average, ms):
 
-- wall-clock: `tool_use=0.0216125`, `multi_step=0.0182375`, `guardrail=0.0067`
-- tool latency: `tool_use=0.00605`, `multi_step=0.007675`, `guardrail=0.0002375`
+- wall-clock: `tool_use=0.046675`, `multi_step=0.0423125`, `guardrail=0.0164875`
+- tool latency: `tool_use=0.01505`, `multi_step=0.016925`, `guardrail=0.000575`
 
 Usage proxy:
 
