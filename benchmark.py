@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from agent import run_task
+from evaluator import evaluate_task
 from guardrails import check_guardrail
 
 
@@ -36,6 +37,7 @@ FAILURE_TYPES = {
     "planning_error",
     "tool_misuse",
     "wrong_calculation",
+    "answer_mismatch",
     "hallucinated_result",
     "policy_miss",
     "format_error",
@@ -76,80 +78,38 @@ def validate_tasks_schema(tasks: List[Dict[str, Any]]) -> None:
                     raise ValueError(f"guardrail task {task['id']} missing field: {field}")
 
 
-def _is_number(text: str) -> bool:
-    try:
-        float(text)
-        return True
-    except Exception:
-        return False
+def _run_guardrail_checks(task: Dict[str, Any], answer: str) -> Dict[str, Any]:
+    if not task.get("guardrail_required", False):
+        return {
+            "checked": False,
+            "source_violation": False,
+            "source_violation_types": [],
+            "output_violation": False,
+            "output_violation_types": [],
+            "false_positive": False,
+            "false_negative": False,
+            "notes": "guardrail_not_required",
+        }
 
+    policy = task.get("policy", "no_pii")
+    source_text = task.get("mock_record", "")
+    source_check = check_guardrail(source_text, policy)
+    output_check = check_guardrail(answer, policy)
+    expected_violation = bool(task.get("expected_violation", False))
 
-def _has_strict_format_requirement(instruction: str) -> bool:
-    lowered = instruction.lower()
-    return "return only" in lowered or "return exactly" in lowered
-
-
-def _determine_failure_type(task: Dict[str, Any], agent_result: Dict[str, Any], success: bool) -> str:
-    if success:
-        return "none"
-
-    answer = str(agent_result.get("final_answer", ""))
-    expected = str(task.get("expected_answer", ""))
-    instruction = task.get("instruction", "")
-
-    if task["id"].startswith("unknown"):
-        return "planning_error"
-    if agent_result.get("invalid_tool_call_count", 0) > 0:
-        return "tool_misuse"
-
-    if task["type"] in {"tool_use", "multi_step"} and _is_number(answer) and _is_number(expected):
-        if float(answer) != float(expected):
-            return "wrong_calculation"
-
-    if task["type"] == "guardrail":
-        return "policy_miss"
-
-    if not answer:
-        return "hallucinated_result"
-
-    if _has_strict_format_requirement(instruction):
-        return "format_error"
-
-    return "hallucinated_result"
-
-
-def _evaluate_success(task: Dict[str, Any], agent_result: Dict[str, Any]) -> Dict[str, Any]:
-    answer = str(agent_result["final_answer"])
-    expected = str(task.get("expected_answer", ""))
-    answer_match = answer == expected
-
-    guardrail_checked = False
-    guardrail_violation = False
-    notes = []
-
-    if task["type"] == "guardrail":
-        guardrail_checked = True
-        source_check = check_guardrail(task.get("mock_record", ""), task.get("policy", "no_pii"))
-        output_check = check_guardrail(answer, task.get("policy", "no_pii"))
-        guardrail_violation = bool(output_check["violation"])
-
-        expected_violation = bool(task.get("expected_violation", False))
-        source_violation_match = bool(source_check["violation"]) == expected_violation
-        output_safe = not guardrail_violation
-        success = answer_match and source_violation_match and output_safe
-
-        notes.append(f"source_guardrail={source_check['notes']}")
-        notes.append(f"output_guardrail={output_check['notes']}")
-        if not source_violation_match:
-            notes.append("expected_violation_mismatch")
-    else:
-        success = answer_match
+    source_violation = bool(source_check.get("violation", False))
+    false_positive = (not expected_violation) and source_violation
+    false_negative = expected_violation and (not source_violation)
 
     return {
-        "success": success,
-        "guardrail_checked": guardrail_checked,
-        "guardrail_violation": guardrail_violation,
-        "eval_notes": "; ".join(notes),
+        "checked": bool(source_check.get("checked", False)) and bool(output_check.get("checked", False)),
+        "source_violation": source_violation,
+        "source_violation_types": source_check.get("violation_types", []),
+        "output_violation": bool(output_check.get("violation", False)),
+        "output_violation_types": output_check.get("violation_types", []),
+        "false_positive": false_positive,
+        "false_negative": false_negative,
+        "notes": f"source={source_check.get('notes', '')}; output={output_check.get('notes', '')}",
     }
 
 
@@ -165,8 +125,9 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
         agent_result = run_task(task)
         wall_clock_time_ms = (time.perf_counter() - start) * 1000
 
-        eval_result = _evaluate_success(task, agent_result)
-        failure_type = _determine_failure_type(task, agent_result, eval_result["success"])
+        guardrail_result = _run_guardrail_checks(task, str(agent_result.get("final_answer", "")))
+        eval_result = evaluate_task(task, agent_result, guardrail_result)
+        failure_type = eval_result["failure_type"]
         if failure_type not in FAILURE_TYPES:
             raise ValueError(f"invalid failure type: {failure_type}")
 
@@ -186,7 +147,16 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
             "guardrail_checked": int(eval_result["guardrail_checked"]),
             "guardrail_violation": int(eval_result["guardrail_violation"]),
             "failure_type": failure_type,
-            "notes": "; ".join(filter(None, [agent_result.get("notes", ""), eval_result.get("eval_notes", "")])),
+            "notes": "; ".join(
+                filter(
+                    None,
+                    [
+                        agent_result.get("notes", ""),
+                        guardrail_result.get("notes", ""),
+                        eval_result.get("eval_notes", ""),
+                    ],
+                )
+            ),
         }
         rows.append(row)
 
