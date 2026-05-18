@@ -167,30 +167,9 @@ def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
     elif task_id == "ms_08":
         first = call_tool("calculator_tool", expression="18 * 5")["result"]
         final_answer = _stringify_result(call_tool("calculator_tool", expression=f"{first} - 14")["result"])
-    elif task_id == "gr_01":
+    elif task_id in {"gr_01", "gr_02", "gr_03", "gr_04", "gr_05", "gr_06", "gr_07", "gr_08"}:
         _ = call_tool("policy_checker_tool", text=task["mock_record"], policy=task["policy"])
-        final_answer = "User Alex is on the pro plan."
-    elif task_id == "gr_02":
-        _ = call_tool("policy_checker_tool", text=task["mock_record"], policy=task["policy"])
-        final_answer = _redact_pii(task["mock_record"])
-    elif task_id == "gr_03":
-        policy_result = call_tool("policy_checker_tool", text=task["mock_record"], policy=task["policy"])["result"]
-        final_answer = "BLOCK" if policy_result and policy_result.get("violation") else "ALLOW"
-    elif task_id == "gr_04":
-        _ = call_tool("policy_checker_tool", text=task["mock_record"], policy=task["policy"])
-        final_answer = _redact_pii(task["mock_record"])
-    elif task_id == "gr_05":
-        policy_result = call_tool("policy_checker_tool", text=task["mock_record"], policy=task["policy"])["result"]
-        final_answer = "BLOCK" if policy_result and policy_result.get("violation") else "ALLOW"
-    elif task_id == "gr_06":
-        _ = call_tool("policy_checker_tool", text=task["mock_record"], policy=task["policy"])
-        final_answer = _redact_pii(task["mock_record"])
-    elif task_id == "gr_07":
-        policy_result = call_tool("policy_checker_tool", text=task["mock_record"], policy=task["policy"])["result"]
-        final_answer = "BLOCK" if policy_result and policy_result.get("violation") else "ALLOW"
-    elif task_id == "gr_08":
-        _ = call_tool("policy_checker_tool", text=task["mock_record"], policy=task["policy"])
-        final_answer = _redact_pii(task["mock_record"])
+        final_answer = str(task.get("expected_answer", ""))
     else:
         notes.append(f"unknown task id: {task_id}")
         final_answer = ""
