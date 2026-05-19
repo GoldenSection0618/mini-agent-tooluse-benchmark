@@ -102,9 +102,38 @@ def _plot_oracle_metric_breakdown(df: pd.DataFrame, fig_dir: Path) -> None:
     plt.close()
 
 
+def _plot_success_rate_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
+    summary = df.groupby("agent_backend", as_index=False)["success"].mean()
+    summary["success_rate"] = summary["success"] * 100
+    plt.figure(figsize=(7, 5))
+    plt.bar(summary["agent_backend"], summary["success_rate"])
+    plt.ylim(0, 100)
+    plt.ylabel("Success Rate (%)")
+    plt.title("Success Rate by Backend")
+    plt.tight_layout()
+    plt.savefig(fig_dir / "success_rate_by_backend.png", dpi=150)
+    plt.close()
+
+
+def _plot_latency_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
+    summary = df.groupby("agent_backend", as_index=False)[["wall_clock_time_ms", "tool_latency_ms"]].mean()
+    x = range(len(summary))
+    width = 0.35
+    plt.figure(figsize=(8, 5))
+    plt.bar([i - width / 2 for i in x], summary["wall_clock_time_ms"], width=width, label="wall_clock_time_ms")
+    plt.bar([i + width / 2 for i in x], summary["tool_latency_ms"], width=width, label="tool_latency_ms")
+    plt.xticks(list(x), summary["agent_backend"])
+    plt.ylabel("Latency (ms)")
+    plt.title("Latency by Backend")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(fig_dir / "latency_by_backend.png", dpi=150)
+    plt.close()
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Analyze benchmark result files.")
-    parser.add_argument("--input", default=None, help="Input results CSV path.")
+    parser.add_argument("--input", nargs="*", default=None, help="Input results CSV path(s).")
     parser.add_argument("--figures-dir", default="figures", help="Directory to save figures.")
     return parser
 
@@ -112,17 +141,24 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = _build_arg_parser()
     args = parser.parse_args()
-    input_path = args.input
-    if input_path is None:
+    input_paths = args.input
+    if not input_paths:
         if Path("results.csv").exists():
-            input_path = "results.csv"
+            input_paths = ["results.csv"]
         else:
-            input_path = "results_rule_based.csv"
+            input_paths = ["results_rule_based.csv"]
 
     fig_dir = Path(args.figures_dir)
     fig_dir.mkdir(parents=True, exist_ok=True)
 
-    df = pd.read_csv(input_path)
+    frames = []
+    for p in input_paths:
+        frame = pd.read_csv(p)
+        if "agent_backend" not in frame.columns:
+            frame["agent_backend"] = Path(p).stem
+        frame["source_file"] = p
+        frames.append(frame)
+    df = pd.concat(frames, ignore_index=True)
 
     overall_success_rate = df["success"].mean() * 100
     success_by_type = (df.groupby("task_type")["success"].mean() * 100).to_dict()
@@ -150,6 +186,9 @@ def main() -> None:
     _plot_failure_distribution(df, fig_dir)
     _plot_failure_flags_distribution(df, fig_dir)
     _plot_oracle_metric_breakdown(df, fig_dir)
+    if len(input_paths) > 1:
+        _plot_success_rate_by_backend(df, fig_dir)
+        _plot_latency_by_backend(df, fig_dir)
 
     print(f"Overall success rate: {overall_success_rate:.2f}%")
     print(f"Success rate by task type: {success_by_type}")
@@ -164,6 +203,14 @@ def main() -> None:
     print(f"Failure flags distribution: {failure_flags_dist}")
     print(f"Average agent step count by task type: {avg_agent_steps}")
     print(f"Tool error count summary: {tool_error_summary}")
+    if len(input_paths) > 1:
+        grouped = (
+            df.groupby(["agent_backend", "task_type"], as_index=False)["success"]
+            .mean()
+            .rename(columns={"success": "success_rate"})
+        )
+        print("Success by backend and task type:")
+        print(grouped.to_string(index=False))
 
 
 if __name__ == "__main__":
