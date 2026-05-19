@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -9,10 +10,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
-FIG_DIR = Path("figures")
-
-
-def _plot_latency_by_task_type(df: pd.DataFrame) -> None:
+def _plot_latency_by_task_type(df: pd.DataFrame, fig_dir: Path) -> None:
     latency = df.groupby("task_type", as_index=False)[["wall_clock_time_ms", "tool_latency_ms"]].mean()
     x = range(len(latency))
     width = 0.35
@@ -25,11 +23,11 @@ def _plot_latency_by_task_type(df: pd.DataFrame) -> None:
     plt.title("Average Latency by Task Type")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "latency_by_task_type.png", dpi=150)
+    plt.savefig(fig_dir / "latency_by_task_type.png", dpi=150)
     plt.close()
 
 
-def _plot_success_rate(df: pd.DataFrame) -> None:
+def _plot_success_rate(df: pd.DataFrame, fig_dir: Path) -> None:
     summary = df.groupby("task_type", as_index=False)[["success", "final_answer_correct"]].mean() * 100
     summary["task_type"] = df.groupby("task_type", as_index=False)["task_type"].first()["task_type"]
     x = range(len(summary))
@@ -44,11 +42,11 @@ def _plot_success_rate(df: pd.DataFrame) -> None:
     plt.title("Success and Final-Answer Correctness by Task Type")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "success_rate_by_task_type.png", dpi=150)
+    plt.savefig(fig_dir / "success_rate_by_task_type.png", dpi=150)
     plt.close()
 
 
-def _plot_failure_distribution(df: pd.DataFrame) -> None:
+def _plot_failure_distribution(df: pd.DataFrame, fig_dir: Path) -> None:
     failure_counts = df["failure_type"].value_counts().sort_index()
 
     plt.figure(figsize=(9, 5))
@@ -57,11 +55,11 @@ def _plot_failure_distribution(df: pd.DataFrame) -> None:
     plt.title("Failure Type Distribution")
     plt.xticks(rotation=20, ha="right")
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "failure_type_distribution.png", dpi=150)
+    plt.savefig(fig_dir / "failure_type_distribution.png", dpi=150)
     plt.close()
 
 
-def _plot_failure_flags_distribution(df: pd.DataFrame) -> None:
+def _plot_failure_flags_distribution(df: pd.DataFrame, fig_dir: Path) -> None:
     flags = []
     for raw in df["failure_flags"]:
         parsed = json.loads(raw)
@@ -75,11 +73,11 @@ def _plot_failure_flags_distribution(df: pd.DataFrame) -> None:
     plt.ylabel("Count")
     plt.title("Failure Flags Distribution")
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "failure_flags_distribution.png", dpi=150)
+    plt.savefig(fig_dir / "failure_flags_distribution.png", dpi=150)
     plt.close()
 
 
-def _plot_oracle_metric_breakdown(df: pd.DataFrame) -> None:
+def _plot_oracle_metric_breakdown(df: pd.DataFrame, fig_dir: Path) -> None:
     metrics = [
         "success",
         "final_answer_correct",
@@ -100,14 +98,31 @@ def _plot_oracle_metric_breakdown(df: pd.DataFrame) -> None:
     plt.title("Oracle Metric Breakdown")
     plt.xticks(rotation=25, ha="right")
     plt.tight_layout()
-    plt.savefig(FIG_DIR / "oracle_metric_breakdown.png", dpi=150)
+    plt.savefig(fig_dir / "oracle_metric_breakdown.png", dpi=150)
     plt.close()
 
 
-def main() -> None:
-    FIG_DIR.mkdir(parents=True, exist_ok=True)
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Analyze benchmark result files.")
+    parser.add_argument("--input", default=None, help="Input results CSV path.")
+    parser.add_argument("--figures-dir", default="figures", help="Directory to save figures.")
+    return parser
 
-    df = pd.read_csv("results.csv")
+
+def main() -> None:
+    parser = _build_arg_parser()
+    args = parser.parse_args()
+    input_path = args.input
+    if input_path is None:
+        if Path("results.csv").exists():
+            input_path = "results.csv"
+        else:
+            input_path = "results_rule_based.csv"
+
+    fig_dir = Path(args.figures_dir)
+    fig_dir.mkdir(parents=True, exist_ok=True)
+
+    df = pd.read_csv(input_path)
 
     overall_success_rate = df["success"].mean() * 100
     success_by_type = (df.groupby("task_type")["success"].mean() * 100).to_dict()
@@ -130,11 +145,11 @@ def main() -> None:
         failure_flags.extend(json.loads(raw))
     failure_flags_dist = pd.Series(failure_flags).value_counts().to_dict() if failure_flags else {}
 
-    _plot_latency_by_task_type(df)
-    _plot_success_rate(df)
-    _plot_failure_distribution(df)
-    _plot_failure_flags_distribution(df)
-    _plot_oracle_metric_breakdown(df)
+    _plot_latency_by_task_type(df, fig_dir)
+    _plot_success_rate(df, fig_dir)
+    _plot_failure_distribution(df, fig_dir)
+    _plot_failure_flags_distribution(df, fig_dir)
+    _plot_oracle_metric_breakdown(df, fig_dir)
 
     print(f"Overall success rate: {overall_success_rate:.2f}%")
     print(f"Success rate by task type: {success_by_type}")

@@ -224,6 +224,7 @@ def _run_guardrail_checks(task: Dict[str, Any], answer: str) -> Dict[str, Any]:
 def run_benchmark(
     tasks_path: Path = Path("tasks.json"),
     output_path: Path = Path("results.csv"),
+    trace_dir: str = "traces",
     settings: Dict[str, Any] | None = None,
 ) -> List[Dict[str, Any]]:
     settings = settings or {}
@@ -242,7 +243,7 @@ def run_benchmark(
 
     for task in tasks:
         task_id = task["id"]
-        trace_path = make_trace_path(task_id)
+        trace_path = make_trace_path(task_id, trace_dir=trace_dir)
         Path(trace_path).write_text("", encoding="utf-8")
         trace_step = 0
         trace_start = time.perf_counter()
@@ -404,6 +405,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-tokens", type=int, default=None)
     parser.add_argument("--timeout-seconds", type=int, default=None)
     parser.add_argument("--config", default=None)
+    parser.add_argument("--output", default=None)
+    parser.add_argument("--trace-dir", default=None)
     return parser
 
 
@@ -411,12 +414,16 @@ def main() -> None:
     parser = _build_arg_parser()
     args = parser.parse_args()
     settings = _get_runtime_settings(args)
+    default_output = "results_rule_based.csv" if settings["agent"] == "rule_based" else "results_lmstudio.csv"
+    default_trace_dir = "traces_rule_based" if settings["agent"] == "rule_based" else "traces_lmstudio"
+    output_path = Path(args.output or default_output)
+    trace_dir = args.trace_dir or default_trace_dir
     try:
-        rows = run_benchmark(settings=settings)
+        rows = run_benchmark(output_path=output_path, trace_dir=trace_dir, settings=settings)
     except RuntimeError as exc:
         print(str(exc))
         raise SystemExit(1) from exc
-    print(f"Wrote results.csv with {len(rows)} rows")
+    print(f"Wrote {output_path} with {len(rows)} rows")
 
 
 if __name__ == "__main__":

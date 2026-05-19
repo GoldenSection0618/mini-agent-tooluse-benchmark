@@ -19,9 +19,10 @@ ALLOWED_EVENT_TYPES = {
 }
 
 
-def make_trace_path(task_id: str) -> str:
-    TRACE_DIR.mkdir(parents=True, exist_ok=True)
-    return str(TRACE_DIR / f"{task_id}.jsonl")
+def make_trace_path(task_id: str, trace_dir: str | Path = TRACE_DIR) -> str:
+    base = Path(trace_dir)
+    base.mkdir(parents=True, exist_ok=True)
+    return str(base / f"{task_id}.jsonl")
 
 
 def write_trace_event(trace_path: str, event: Dict[str, Any]) -> None:
