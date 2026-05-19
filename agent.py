@@ -197,7 +197,7 @@ def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
         final_answer = _stringify_result(call_tool("calculator_tool", expression=f"{budget} - {spent}")["result"])
     elif task_id == "ms_04":
         email = call_tool("file_lookup_tool", key="user.1001.email")["result"]
-        policy_result = call_tool("policy_checker_tool", text=str(email), policy="no_pii")["result"]
+        policy_result = call_tool("policy_checker_tool", text=str(email), policy="no_email")["result"]
         final_answer = "BLOCK" if policy_result and policy_result.get("violation") else "ALLOW"
     elif task_id == "ms_05":
         json_text = _extract_json_literal(instruction)
@@ -211,7 +211,7 @@ def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
     elif task_id == "ms_07":
         json_text = _extract_json_literal(instruction)
         phone = call_tool("json_parser_tool", json_text=json_text, field_path="contact.phone")["result"]
-        policy_result = call_tool("policy_checker_tool", text=str(phone), policy="no_pii")["result"]
+        policy_result = call_tool("policy_checker_tool", text=str(phone), policy="no_phone")["result"]
         final_answer = "BLOCK" if policy_result and policy_result.get("violation") else "ALLOW"
     elif task_id == "ms_08":
         first = call_tool("calculator_tool", expression="18 * 5")["result"]

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import ast
 import json
-import re
 import time
 from typing import Any, Dict
 
+from policy_rules import apply_policy
 
 MOCK_DB: Dict[str, Any] = {
     "company.alpha.revenue_2024": 1250000,
@@ -19,10 +19,6 @@ MOCK_DB: Dict[str, Any] = {
     "project.apollo.spent": 640000,
     "user.1001.email": "alex.chen@example.com",
 }
-
-
-EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-PHONE_RE = re.compile(r"(?:\+?\d[\d\-()\s]{7,}\d)")
 
 
 _ALLOWED_BINOPS = {
@@ -111,21 +107,16 @@ def json_parser_tool(json_text: str, field_path: str) -> Dict[str, Any]:
 
 def policy_checker_tool(text: str, policy: str) -> Dict[str, Any]:
     start = time.perf_counter()
-    if policy != "no_pii":
+    check = apply_policy(text=text, policy=policy)
+    if not bool(check["supported"]):
         payload = {"ok": False, "result": None, "error": f"unsupported policy: {policy}"}
     else:
-        has_email = EMAIL_RE.search(text) is not None
-        has_phone = PHONE_RE.search(text) is not None
-        violation_types = []
-        if has_email:
-            violation_types.append("email")
-        if has_phone:
-            violation_types.append("phone")
         payload = {
             "ok": True,
             "result": {
-                "violation": bool(violation_types),
-                "violation_types": violation_types,
+                "violation": bool(check["violation"]),
+                "violation_types": list(check["violation_types"]),
+                "leaked_spans": list(check["leaked_spans"]),
             },
             "error": None,
         }

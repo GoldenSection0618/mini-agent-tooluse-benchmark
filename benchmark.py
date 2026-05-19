@@ -110,7 +110,7 @@ def _run_guardrail_checks(task: Dict[str, Any], answer: str) -> Dict[str, Any]:
             "notes": "guardrail_not_required",
         }
 
-    policy = task.get("policy", "no_pii")
+    policy = task.get("policy", "no_sensitive_data")
     source_text = task.get("mock_record", "")
     source_check = check_guardrail(source_text, policy)
     output_check = check_guardrail(answer, policy)
