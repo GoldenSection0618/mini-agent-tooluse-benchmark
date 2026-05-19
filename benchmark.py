@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import time
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -16,6 +18,12 @@ from tracing import make_trace_path, new_event, write_trace_event
 
 
 RESULT_COLUMNS = [
+    "agent_backend",
+    "model_name",
+    "temperature",
+    "max_tokens",
+    "run_id",
+    "llm_decision_time_ms",
     "task_id",
     "task_type",
     "task_subtype",
@@ -61,6 +69,41 @@ FAILURE_TYPES = {
     "policy_miss",
     "format_error",
 }
+
+
+def _load_json_config(path: str | None) -> Dict[str, Any]:
+    if not path:
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _get_runtime_settings(args: argparse.Namespace) -> Dict[str, Any]:
+    file_cfg = _load_json_config(args.config)
+    lm_cfg = file_cfg.get("lmstudio", {})
+    backend_from_cfg = file_cfg.get("agent_backend")
+
+    backend = args.agent or backend_from_cfg or "rule_based"
+    base_url = args.base_url if args.base_url is not None else lm_cfg.get("base_url", "http://localhost:1234")
+    chat_endpoint = (
+        args.chat_endpoint if args.chat_endpoint is not None else lm_cfg.get("chat_endpoint", "/api/v1/chat")
+    )
+    model = args.model if args.model is not None else lm_cfg.get("model", "google/gemma-4-e4b")
+    temperature = args.temperature if args.temperature is not None else lm_cfg.get("temperature", 0)
+    max_tokens = args.max_tokens if args.max_tokens is not None else lm_cfg.get("max_tokens", 512)
+    timeout_seconds = (
+        args.timeout_seconds if args.timeout_seconds is not None else lm_cfg.get("timeout_seconds", 120)
+    )
+
+    return {
+        "agent": backend,
+        "base_url": base_url,
+        "chat_endpoint": chat_endpoint,
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "timeout_seconds": timeout_seconds,
+    }
 
 
 def validate_tasks_schema(tasks: List[Dict[str, Any]]) -> None:
@@ -139,7 +182,18 @@ def _run_guardrail_checks(task: Dict[str, Any], answer: str) -> Dict[str, Any]:
     }
 
 
-def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Path("results.csv")) -> List[Dict[str, Any]]:
+def run_benchmark(
+    tasks_path: Path = Path("tasks.json"),
+    output_path: Path = Path("results.csv"),
+    settings: Dict[str, Any] | None = None,
+) -> List[Dict[str, Any]]:
+    settings = settings or {}
+    agent_backend = str(settings.get("agent", "rule_based"))
+    model_name = "rule_based" if agent_backend == "rule_based" else str(settings.get("model", ""))
+    temperature = settings.get("temperature", 0 if agent_backend == "rule_based" else "")
+    max_tokens = "" if agent_backend == "rule_based" else settings.get("max_tokens", 512)
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
     with tasks_path.open("r", encoding="utf-8") as f:
         tasks: List[Dict[str, Any]] = json.load(f)
     validate_tasks_schema(tasks)
@@ -164,10 +218,17 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
             task_type=task["type"],
             task_subtype=task.get("subtype", ""),
             instruction=task["instruction"],
+            backend=agent_backend,
+            model_name=model_name,
         )
 
         start = time.perf_counter()
-        agent_result = run_task(task)
+        if agent_backend == "rule_based":
+            agent_result = run_task(task)
+        else:
+            raise NotImplementedError(
+                "LM Studio backend wiring is not available yet. Use --agent rule_based for now."
+            )
         wall_clock_time_ms = (time.perf_counter() - start) * 1000
         for event in agent_result.get("trace_events", []):
             payload = dict(event)
@@ -223,6 +284,12 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
             )
         )
         row = {
+            "agent_backend": agent_backend,
+            "model_name": model_name,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "run_id": run_id,
+            "llm_decision_time_ms": float(agent_result.get("llm_decision_time_ms", 0.0)),
             "task_id": task["id"],
             "task_type": task["type"],
             "task_subtype": task.get("subtype", ""),
@@ -259,8 +326,11 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
         }
         append_trace(
             "task_end",
+            agent_backend=agent_backend,
+            model_name=model_name,
             success=bool(eval_result["success"]),
             failure_type=failure_type,
+            failure_flags=eval_result.get("failure_flags", []),
             notes=notes,
         )
         rows.append(row)
@@ -273,8 +343,24 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
     return rows
 
 
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run mini agent tool-use benchmark.")
+    parser.add_argument("--agent", choices=["rule_based", "lmstudio"], default=None)
+    parser.add_argument("--base-url", default=None)
+    parser.add_argument("--chat-endpoint", default=None)
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--temperature", type=float, default=None)
+    parser.add_argument("--max-tokens", type=int, default=None)
+    parser.add_argument("--timeout-seconds", type=int, default=None)
+    parser.add_argument("--config", default=None)
+    return parser
+
+
 def main() -> None:
-    rows = run_benchmark()
+    parser = _build_arg_parser()
+    args = parser.parse_args()
+    settings = _get_runtime_settings(args)
+    rows = run_benchmark(settings=settings)
     print(f"Wrote results.csv with {len(rows)} rows")
 
 
