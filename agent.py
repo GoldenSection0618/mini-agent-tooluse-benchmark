@@ -1,4 +1,4 @@
-"""Rule-based baseline agent for the mini benchmark."""
+"""Rule-based and local-LLM agents for the mini benchmark."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import re
 from typing import Any, Dict, List
 
+from llm_clients import LMStudioClient
 from tracing import new_event
 from tools import calculator_tool, file_lookup_tool, json_parser_tool, policy_checker_tool
 
@@ -58,7 +59,7 @@ def _extract_json_literal(text: str) -> str:
     raise ValueError("unterminated JSON object")
 
 
-def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
+def _run_rule_based_task(task: Dict[str, Any]) -> Dict[str, Any]:
     task_id = task["id"]
     instruction = task["instruction"]
     allowed_tools = set(task.get("allowed_tools", []))
@@ -188,9 +189,7 @@ def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
         json_text = _extract_json_literal(instruction)
         subtotal = call_tool("json_parser_tool", json_text=json_text, field_path="invoice.subtotal")["result"]
         tax_rate = call_tool("json_parser_tool", json_text=json_text, field_path="invoice.tax_rate")["result"]
-        final_answer = _stringify_result(
-            call_tool("calculator_tool", expression=f"{subtotal} * (1 + {tax_rate})")["result"]
-        )
+        final_answer = _stringify_result(call_tool("calculator_tool", expression=f"{subtotal} * (1 + {tax_rate})")["result"])
     elif task_id == "ms_03":
         budget = call_tool("file_lookup_tool", key="project.apollo.budget")["result"]
         spent = call_tool("file_lookup_tool", key="project.apollo.spent")["result"]
@@ -240,7 +239,273 @@ def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
         "output_tokens": output_tokens,
         "cost_usd": round(cost_usd, 10),
         "notes": "; ".join(notes),
+        "llm_decision_time_ms": 0.0,
+        "raw_model_outputs": [],
     }
 
 
-__all__ = ["run_task"]
+class RuleBasedAgent:
+    def __init__(
+        self,
+        input_cost_per_token_usd: float = INPUT_TOKEN_PRICE,
+        output_cost_per_token_usd: float = OUTPUT_TOKEN_PRICE,
+    ) -> None:
+        self.input_cost_per_token_usd = input_cost_per_token_usd
+        self.output_cost_per_token_usd = output_cost_per_token_usd
+
+    def run_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        result = _run_rule_based_task(task)
+        result["cost_usd"] = round(
+            result["input_tokens"] * self.input_cost_per_token_usd
+            + result["output_tokens"] * self.output_cost_per_token_usd,
+            10,
+        )
+        return result
+
+
+class LocalLLMAgent:
+    def __init__(
+        self,
+        client: LMStudioClient,
+        input_cost_per_token_usd: float = INPUT_TOKEN_PRICE,
+        output_cost_per_token_usd: float = OUTPUT_TOKEN_PRICE,
+    ) -> None:
+        self.client = client
+        self.input_cost_per_token_usd = input_cost_per_token_usd
+        self.output_cost_per_token_usd = output_cost_per_token_usd
+
+    def _parse_action_json(self, text: str) -> Dict[str, Any]:
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.strip("`")
+            if "\n" in cleaned:
+                cleaned = cleaned.split("\n", 1)[1]
+        return json.loads(cleaned)
+
+    def run_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        task_id = task["id"]
+        instruction = task["instruction"]
+        allowed_tools = set(task.get("allowed_tools", []))
+
+        tool_calls: List[Dict[str, Any]] = []
+        trace_events: List[Dict[str, Any]] = []
+        internal_token_inputs: List[str] = []
+        raw_model_outputs: List[str] = []
+        notes: List[str] = []
+
+        invalid_tool_call_count = 0
+        retry_count = 0
+        step_counter = 0
+        llm_decision_time_ms = 0.0
+
+        def emit(event_type: str, **kwargs: Any) -> None:
+            nonlocal step_counter
+            step_counter += 1
+            trace_events.append(new_event(task_id=task_id, step=step_counter, event_type=event_type, **kwargs))
+
+        def call_tool(name: str, **kwargs: Any) -> Dict[str, Any]:
+            nonlocal invalid_tool_call_count
+            internal_token_inputs.append(name)
+            internal_token_inputs.extend([f"{k}={v}" for k, v in kwargs.items()])
+            is_valid = name in TOOL_MAP and name in allowed_tools
+            emit("tool_call", tool=name, args=kwargs, valid=is_valid)
+
+            if name not in TOOL_MAP:
+                invalid_tool_call_count += 1
+                payload = {"ok": False, "result": None, "error": "unknown tool", "latency_ms": 0.0}
+                tool_calls.append(
+                    {
+                        "tool": name,
+                        "arguments": kwargs,
+                        "result": None,
+                        "latency_ms": 0.0,
+                        "valid": False,
+                        "ok": False,
+                        "error": payload["error"],
+                    }
+                )
+                emit("tool_result", tool=name, args=kwargs, valid=False, latency_ms=0.0, ok=False, error=payload["error"])
+                return payload
+
+            if name not in allowed_tools:
+                invalid_tool_call_count += 1
+                payload = {"ok": False, "result": None, "error": "tool not allowed", "latency_ms": 0.0}
+                tool_calls.append(
+                    {
+                        "tool": name,
+                        "arguments": kwargs,
+                        "result": None,
+                        "latency_ms": 0.0,
+                        "valid": False,
+                        "ok": False,
+                        "error": payload["error"],
+                    }
+                )
+                emit("tool_result", tool=name, args=kwargs, valid=False, latency_ms=0.0, ok=False, error=payload["error"])
+                return payload
+
+            response = TOOL_MAP[name](**kwargs)
+            tool_calls.append(
+                {
+                    "tool": name,
+                    "arguments": kwargs,
+                    "result": response.get("result"),
+                    "latency_ms": response.get("latency_ms", 0.0),
+                    "valid": True,
+                    "ok": bool(response.get("ok", False)),
+                    "error": response.get("error"),
+                }
+            )
+            emit(
+                "tool_result",
+                tool=name,
+                args=kwargs,
+                valid=True,
+                latency_ms=float(response.get("latency_ms", 0.0)),
+                ok=bool(response.get("ok", False)),
+                result=response.get("result"),
+                error=response.get("error"),
+            )
+            return response
+
+        action_system_prompt = (
+            "You are an agent planner. Return JSON only with keys tool_calls and final_answer. "
+            "tool_calls is an array of {tool, args}. If tools are needed, set final_answer to null."
+        )
+        action_input = json.dumps(
+            {
+                "task_id": task_id,
+                "instruction": instruction,
+                "allowed_tools": sorted(allowed_tools),
+            },
+            ensure_ascii=True,
+        )
+
+        emit("agent_decision", backend="lmstudio", model_name=self.client.model, phase="action_selection", notes="request")
+        action_resp = self.client.chat(action_system_prompt, action_input)
+        llm_decision_time_ms += float(action_resp.get("latency_ms", 0.0))
+        action_text = str(action_resp.get("content", ""))
+        raw_model_outputs.append(action_text)
+        internal_token_inputs.extend([action_system_prompt, action_input])
+
+        action_data: Dict[str, Any] = {}
+        parse_ok = False
+        for attempt in range(2):
+            try:
+                action_data = self._parse_action_json(action_text)
+                parse_ok = True
+                break
+            except Exception:
+                retry_count += 1
+                if attempt == 0:
+                    repair_prompt = (
+                        "Return strictly valid JSON with keys tool_calls and final_answer only. "
+                        "Do not include markdown."
+                    )
+                    repair_input = action_text
+                    repair_resp = self.client.chat(repair_prompt, repair_input)
+                    llm_decision_time_ms += float(repair_resp.get("latency_ms", 0.0))
+                    action_text = str(repair_resp.get("content", ""))
+                    raw_model_outputs.append(action_text)
+                    internal_token_inputs.extend([repair_prompt, repair_input])
+
+        emit(
+            "agent_decision",
+            backend="lmstudio",
+            model_name=self.client.model,
+            phase="action_selection",
+            parse_ok=parse_ok,
+            retry_index=retry_count,
+            model_output_preview=action_text[:500],
+        )
+
+        if not parse_ok:
+            notes.append("llm_invalid_json")
+            final_answer = ""
+        else:
+            requested_calls = action_data.get("tool_calls", []) or []
+            for call in requested_calls:
+                if not isinstance(call, dict):
+                    invalid_tool_call_count += 1
+                    notes.append("llm_disallowed_tool")
+                    continue
+                tool_name = str(call.get("tool", ""))
+                args = call.get("args", {})
+                if not isinstance(args, dict):
+                    args = {}
+                response = call_tool(tool_name, **args)
+                if not response.get("ok", False):
+                    notes.append("tool_execution_failed")
+
+            proposed_final = action_data.get("final_answer")
+            if proposed_final is None:
+                observation_payload = {
+                    "instruction": instruction,
+                    "observations": [
+                        {
+                            "tool": c["tool"],
+                            "arguments": c["arguments"],
+                            "result": c["result"],
+                            "ok": c["ok"],
+                            "error": c["error"],
+                        }
+                        for c in tool_calls
+                    ],
+                }
+                final_system_prompt = "You are an answer generator. Return JSON only with keys final_answer and notes."
+                final_input = json.dumps(observation_payload, ensure_ascii=True)
+                emit("agent_decision", backend="lmstudio", model_name=self.client.model, phase="final_answer", notes="request")
+                final_resp = self.client.chat(final_system_prompt, final_input)
+                llm_decision_time_ms += float(final_resp.get("latency_ms", 0.0))
+                final_text = str(final_resp.get("content", ""))
+                raw_model_outputs.append(final_text)
+                internal_token_inputs.extend([final_system_prompt, final_input])
+                try:
+                    final_data = self._parse_action_json(final_text)
+                    final_answer = str(final_data.get("final_answer", ""))
+                except Exception:
+                    retry_count += 1
+                    notes.append("llm_invalid_json")
+                    final_answer = ""
+                emit(
+                    "agent_decision",
+                    backend="lmstudio",
+                    model_name=self.client.model,
+                    phase="final_answer",
+                    parse_ok=bool(final_answer),
+                    retry_index=retry_count,
+                    model_output_preview=final_text[:500],
+                )
+            else:
+                final_answer = str(proposed_final)
+
+        if not final_answer:
+            notes.append("llm_empty_answer")
+
+        emit("agent_decision", backend="lmstudio", model_name=self.client.model, notes="final_answer_generated", final_answer=final_answer)
+
+        input_tokens = _count_tokens(" ".join(internal_token_inputs))
+        output_tokens = _count_tokens(" ".join(raw_model_outputs) + " " + final_answer)
+        cost_usd = input_tokens * self.input_cost_per_token_usd + output_tokens * self.output_cost_per_token_usd
+
+        return {
+            "final_answer": final_answer,
+            "tool_calls": tool_calls,
+            "trace_events": trace_events,
+            "agent_step_count": step_counter,
+            "invalid_tool_call_count": invalid_tool_call_count,
+            "retry_count": retry_count,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cost_usd": round(cost_usd, 10),
+            "notes": "; ".join(notes),
+            "llm_decision_time_ms": round(llm_decision_time_ms, 4),
+            "raw_model_outputs": raw_model_outputs,
+        }
+
+
+def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    return RuleBasedAgent().run_task(task)
+
+
+__all__ = ["run_task", "RuleBasedAgent", "LocalLLMAgent"]
