@@ -7,6 +7,7 @@ import re
 from typing import Any, Dict, List
 
 from llm_clients import LMStudioClient
+from parsing import extract_json_object
 from tracing import new_event
 from tools import calculator_tool, file_lookup_tool, json_parser_tool, policy_checker_tool
 
@@ -275,12 +276,7 @@ class LocalLLMAgent:
         self.output_cost_per_token_usd = output_cost_per_token_usd
 
     def _parse_action_json(self, text: str) -> Dict[str, Any]:
-        cleaned = text.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.strip("`")
-            if "\n" in cleaned:
-                cleaned = cleaned.split("\n", 1)[1]
-        return json.loads(cleaned)
+        return extract_json_object(text)
 
     def run_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         task_id = task["id"]

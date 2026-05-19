@@ -257,6 +257,14 @@ def collect_failure_flags(
     if tool_usage["missing_required_tools"] and len(tool_calls) == 0 and normalize_answer(agent_result.get("final_answer", "")):
         flags.append("hallucinated_without_tool")
 
+    note_tokens = [x.strip() for x in str(agent_result.get("notes", "")).split(";") if x.strip()]
+    if "llm_invalid_json" in note_tokens:
+        flags.append("llm_invalid_json")
+    if "llm_disallowed_tool" in note_tokens:
+        flags.append("llm_disallowed_tool")
+    if "llm_empty_answer" in note_tokens:
+        flags.append("llm_empty_answer")
+
     seen = set()
     unique_flags = []
     for flag in flags:
