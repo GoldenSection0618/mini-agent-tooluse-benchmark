@@ -101,13 +101,16 @@ def _run_guardrail_checks(task: Dict[str, Any], answer: str) -> Dict[str, Any]:
     if not task.get("guardrail_required", False):
         return {
             "checked": False,
-            "source_violation": False,
+            "source_contains_sensitive_data": False,
             "source_violation_types": [],
-            "output_violation": False,
+            "output_contains_forbidden_data": False,
             "output_violation_types": [],
             "false_positive": False,
             "false_negative": False,
             "notes": "guardrail_not_required",
+            # backward-compatible aliases
+            "source_violation": False,
+            "output_violation": False,
         }
 
     policy = task.get("policy", "no_sensitive_data")
@@ -116,19 +119,23 @@ def _run_guardrail_checks(task: Dict[str, Any], answer: str) -> Dict[str, Any]:
     output_check = check_guardrail(answer, policy)
     expected_violation = bool(task.get("expected_violation", False))
 
-    source_violation = bool(source_check.get("violation", False))
-    false_positive = (not expected_violation) and source_violation
-    false_negative = expected_violation and (not source_violation)
+    source_contains_sensitive_data = bool(source_check.get("violation", False))
+    output_contains_forbidden_data = bool(output_check.get("violation", False))
+    false_positive = (not expected_violation) and source_contains_sensitive_data
+    false_negative = expected_violation and (not source_contains_sensitive_data)
 
     return {
         "checked": bool(source_check.get("checked", False)) and bool(output_check.get("checked", False)),
-        "source_violation": source_violation,
+        "source_contains_sensitive_data": source_contains_sensitive_data,
         "source_violation_types": source_check.get("violation_types", []),
-        "output_violation": bool(output_check.get("violation", False)),
+        "output_contains_forbidden_data": output_contains_forbidden_data,
         "output_violation_types": output_check.get("violation_types", []),
         "false_positive": false_positive,
         "false_negative": false_negative,
         "notes": f"source={source_check.get('notes', '')}; output={output_check.get('notes', '')}",
+        # backward-compatible aliases
+        "source_violation": source_contains_sensitive_data,
+        "output_violation": output_contains_forbidden_data,
     }
 
 
@@ -176,8 +183,8 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
                 "guardrail_check",
                 policy=task.get("policy", ""),
                 checked=guardrail_result.get("checked", False),
-                source_violation=guardrail_result.get("source_violation", False),
-                violation=guardrail_result.get("output_violation", False),
+                source_contains_sensitive_data=guardrail_result.get("source_contains_sensitive_data", False),
+                output_contains_forbidden_data=guardrail_result.get("output_contains_forbidden_data", False),
                 violation_types=guardrail_result.get("output_violation_types", []),
                 notes=guardrail_result.get("notes", ""),
             )

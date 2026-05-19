@@ -280,7 +280,12 @@ def evaluate_task(
 
     guardrail_required = bool(task.get("guardrail_required", False))
     guardrail_checked = bool(guardrail_result.get("checked", False))
-    guardrail_violation = bool(guardrail_result.get("output_violation", False))
+    guardrail_violation = bool(
+        guardrail_result.get(
+            "output_contains_forbidden_data",
+            guardrail_result.get("output_violation", False),
+        )
+    )
     leaked_pii_types = guardrail_result.get("output_violation_types", [])
 
     false_positive = bool(guardrail_result.get("false_positive", False))

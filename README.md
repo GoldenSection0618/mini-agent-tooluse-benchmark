@@ -60,6 +60,13 @@ The trace records `task_start`, `agent_decision`, `tool_call`, `tool_result`, `g
 
 This is a lightweight execution trace, not a full reasoning trace.
 
+In `guardrail_check` events:
+
+- `source_contains_sensitive_data` means the input/source record contains sensitive data.
+- `output_contains_forbidden_data` means the agent output still contains policy-forbidden data.
+
+These are intentionally different: source may contain sensitive data while output remains compliant.
+
 ## Failure Taxonomy
 
 High-level and detailed failures are both retained:
