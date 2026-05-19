@@ -6,6 +6,7 @@ import json
 import re
 from typing import Any, Dict, List
 
+from tracing import new_event
 from tools import calculator_tool, file_lookup_tool, json_parser_tool, policy_checker_tool
 
 
@@ -58,18 +59,36 @@ def _extract_json_literal(text: str) -> str:
 
 
 def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    task_id = task["id"]
     instruction = task["instruction"]
     allowed_tools = set(task.get("allowed_tools", []))
     tool_calls: List[Dict[str, Any]] = []
+    trace_events: List[Dict[str, Any]] = []
     invalid_tool_call_count = 0
     retry_count = 0
+    step_counter = 0
     internal_token_inputs: List[str] = []
     notes: List[str] = []
+
+    def emit(event_type: str, **kwargs: Any) -> None:
+        nonlocal step_counter
+        step_counter += 1
+        trace_events.append(new_event(task_id=task_id, step=step_counter, event_type=event_type, **kwargs))
+
+    emit(
+        "agent_decision",
+        instruction=instruction,
+        allowed_tools=sorted(allowed_tools),
+        notes="start_task",
+    )
 
     def call_tool(name: str, **kwargs: Any) -> Dict[str, Any]:
         nonlocal invalid_tool_call_count
         internal_token_inputs.append(name)
         internal_token_inputs.extend([f"{k}={v}" for k, v in kwargs.items()])
+        is_valid = name in TOOL_MAP and name in allowed_tools
+
+        emit("tool_call", tool=name, args=kwargs, valid=is_valid)
 
         if name not in TOOL_MAP:
             invalid_tool_call_count += 1
@@ -82,6 +101,15 @@ def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
                 "error": "unknown tool",
             }
             tool_calls.append(record)
+            emit(
+                "tool_result",
+                tool=name,
+                args=kwargs,
+                valid=False,
+                latency_ms=0.0,
+                ok=False,
+                error="unknown tool",
+            )
             return {"ok": False, "result": None, "error": "unknown tool", "latency_ms": 0.0}
 
         if name not in allowed_tools:
@@ -95,6 +123,15 @@ def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
                 "error": "tool not allowed",
             }
             tool_calls.append(record)
+            emit(
+                "tool_result",
+                tool=name,
+                args=kwargs,
+                valid=False,
+                latency_ms=0.0,
+                ok=False,
+                error="tool not allowed",
+            )
             return {"ok": False, "result": None, "error": "tool not allowed", "latency_ms": 0.0}
 
         response = TOOL_MAP[name](**kwargs)
@@ -108,9 +145,18 @@ def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
                 "error": response.get("error"),
             }
         )
+        emit(
+            "tool_result",
+            tool=name,
+            args=kwargs,
+            valid=True,
+            latency_ms=float(response.get("latency_ms", 0.0)),
+            ok=bool(response.get("ok", False)),
+            result=response.get("result"),
+            error=response.get("error"),
+        )
         return response
 
-    task_id = task["id"]
     final_answer = ""
 
     if task_id == "tu_01":
@@ -174,6 +220,8 @@ def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
         notes.append(f"unknown task id: {task_id}")
         final_answer = ""
 
+    emit("agent_decision", notes="final_answer_generated", final_answer=final_answer)
+
     input_tokens = _count_tokens(instruction + " " + " ".join(internal_token_inputs))
     output_tokens = _count_tokens(final_answer)
     cost_usd = input_tokens * INPUT_TOKEN_PRICE + output_tokens * OUTPUT_TOKEN_PRICE
@@ -181,6 +229,8 @@ def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "final_answer": final_answer,
         "tool_calls": tool_calls,
+        "trace_events": trace_events,
+        "agent_step_count": step_counter,
         "invalid_tool_call_count": invalid_tool_call_count,
         "retry_count": retry_count,
         "input_tokens": input_tokens,
