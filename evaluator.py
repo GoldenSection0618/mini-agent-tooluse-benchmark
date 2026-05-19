@@ -116,6 +116,24 @@ def check_tool_arguments(task: Dict[str, Any], agent_result: Dict[str, Any]) -> 
     return {"tool_argument_match": len(notes) == 0, "notes": notes}
 
 
+def check_tool_execution(agent_result: Dict[str, Any]) -> Dict[str, Any]:
+    tool_calls = agent_result.get("tool_calls", [])
+    errors: List[str] = []
+    for idx, call in enumerate(tool_calls):
+        valid = bool(call.get("valid", False))
+        ok = bool(call.get("ok", False))
+        error = call.get("error")
+        failed = (not valid) or (not ok) or bool(error)
+        if failed:
+            detail = f"step_{idx+1}:{call.get('tool')}:{error or 'tool_execution_failed'}"
+            errors.append(detail)
+    return {
+        "tool_execution_success": len(errors) == 0,
+        "tool_error_count": len(errors),
+        "tool_errors": errors,
+    }
+
+
 def check_expected_contains_excludes(task: Dict[str, Any], agent_result: Dict[str, Any]) -> Dict[str, Any]:
     answer = normalize_answer(agent_result.get("final_answer", ""))
     contains = task.get("expected_answer_contains", []) or []
@@ -141,6 +159,9 @@ def classify_failure(task: Dict[str, Any], checks: Dict[str, Any]) -> str:
 
     if not checks.get("required_tools_called"):
         return "tool_misuse" if checks.get("tool_call_count", 0) > 0 else "hallucinated_result"
+
+    if not checks.get("tool_execution_success", True):
+        return "tool_misuse"
 
     if task.get("type") == "multi_step" and not checks.get("tool_sequence_match"):
         return "planning_error"
@@ -172,6 +193,7 @@ def collect_failure_flags(
     sequence_check: Dict[str, Any],
     args_check: Dict[str, Any],
     contains_check: Dict[str, Any],
+    tool_exec_check: Dict[str, Any],
     guardrail_violation: bool,
     false_positive: bool,
     false_negative: bool,
@@ -187,6 +209,11 @@ def collect_failure_flags(
 
     if any((tool not in allowed_tools) or (not bool(call.get("valid", False))) for tool, call in zip(actual_tools, tool_calls)):
         flags.append("unexpected_tool_used")
+
+    if not tool_exec_check["tool_execution_success"]:
+        flags.append("tool_execution_failed")
+        if any("unsupported policy" in str(call.get("error", "")).lower() for call in tool_calls):
+            flags.append("unsupported_policy")
 
     if not sequence_check["tool_sequence_match"]:
         flags.append("tool_sequence_mismatch")
@@ -248,6 +275,7 @@ def evaluate_task(
     tool_usage = check_tool_usage(task, agent_result)
     sequence_check = check_tool_sequence(task, agent_result)
     args_check = check_tool_arguments(task, agent_result)
+    tool_exec_check = check_tool_execution(agent_result)
     contains_check = check_expected_contains_excludes(task, agent_result)
 
     guardrail_required = bool(task.get("guardrail_required", False))
@@ -262,6 +290,7 @@ def evaluate_task(
         tool_usage["required_tools_called"]
         and sequence_check["tool_sequence_match"]
         and args_check["tool_argument_match"]
+        and tool_exec_check["tool_execution_success"]
     )
 
     guardrail_success = True
@@ -273,6 +302,7 @@ def evaluate_task(
         and tool_usage["required_tools_called"]
         and sequence_check["tool_sequence_match"]
         and args_check["tool_argument_match"]
+        and tool_exec_check["tool_execution_success"]
         and answer_check["format_correct"]
         and contains_check["contains_excludes_match"]
         and (guardrail_success if guardrail_required else True)
@@ -286,6 +316,7 @@ def evaluate_task(
         sequence_check=sequence_check,
         args_check=args_check,
         contains_check=contains_check,
+        tool_exec_check=tool_exec_check,
         guardrail_violation=guardrail_violation,
         false_positive=false_positive,
         false_negative=false_negative,
@@ -300,6 +331,8 @@ def evaluate_task(
         "required_tools_called": tool_usage["required_tools_called"],
         "tool_sequence_match": sequence_check["tool_sequence_match"],
         "tool_argument_match": args_check["tool_argument_match"],
+        "tool_execution_success": tool_exec_check["tool_execution_success"],
+        "tool_error_count": tool_exec_check["tool_error_count"],
         "contains_excludes_match": contains_check["contains_excludes_match"],
         "planning_success": planning_success,
         "guardrail_checked": guardrail_checked,
@@ -316,6 +349,7 @@ def evaluate_task(
     notes: List[str] = []
     notes.extend(answer_check["notes"])
     notes.extend(args_check["notes"])
+    notes.extend(tool_exec_check["tool_errors"])
     notes.extend([f"missing_required:{x}" for x in tool_usage["missing_required_tools"]])
     notes.extend([f"missing_contains:{x}" for x in contains_check["missing_contains"]])
     notes.extend([f"excluded_present:{x}" for x in contains_check["present_excludes"]])
@@ -325,6 +359,8 @@ def evaluate_task(
         "required_tools_called": tool_usage["required_tools_called"],
         "tool_sequence_match": sequence_check["tool_sequence_match"],
         "tool_argument_match": args_check["tool_argument_match"],
+        "tool_execution_success": tool_exec_check["tool_execution_success"],
+        "tool_error_count": tool_exec_check["tool_error_count"],
         "format_correct": answer_check["format_correct"],
         "contains_excludes_match": contains_check["contains_excludes_match"],
         "planning_success": planning_success,
@@ -347,6 +383,7 @@ __all__ = [
     "check_tool_usage",
     "check_tool_sequence",
     "check_tool_arguments",
+    "check_tool_execution",
     "check_expected_contains_excludes",
     "classify_failure",
     "evaluate_task",

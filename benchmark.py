@@ -24,6 +24,7 @@ RESULT_COLUMNS = [
     "required_tools_called",
     "tool_sequence_match",
     "tool_argument_match",
+    "tool_execution_success",
     "planning_success",
     "format_correct",
     "contains_excludes_match",
@@ -188,6 +189,7 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
                 "required_tools_called": eval_result["required_tools_called"],
                 "tool_sequence_match": eval_result["tool_sequence_match"],
                 "tool_argument_match": eval_result["tool_argument_match"],
+                "tool_execution_success": eval_result["tool_execution_success"],
                 "planning_success": eval_result["planning_success"],
                 "format_correct": eval_result["format_correct"],
                 "contains_excludes_match": eval_result["contains_excludes_match"],
@@ -201,11 +203,7 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
             raise ValueError(f"invalid failure type: {failure_type}")
 
         tool_latency_ms = sum(float(call.get("latency_ms", 0.0)) for call in agent_result["tool_calls"])
-        tool_error_count = sum(
-            1
-            for call in agent_result["tool_calls"]
-            if (not bool(call.get("valid", False))) or bool(call.get("error"))
-        )
+        tool_error_count = int(eval_result["tool_error_count"])
         guardrail_step_count = 1 if task.get("guardrail_required", False) else 0
         agent_step_count = len(agent_result.get("trace_events", [])) + guardrail_step_count + 1
         notes = "; ".join(
@@ -226,6 +224,7 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
             "required_tools_called": int(eval_result["required_tools_called"]),
             "tool_sequence_match": int(eval_result["tool_sequence_match"]),
             "tool_argument_match": int(eval_result["tool_argument_match"]),
+            "tool_execution_success": int(eval_result["tool_execution_success"]),
             "planning_success": int(eval_result["planning_success"]),
             "format_correct": int(eval_result["format_correct"]),
             "contains_excludes_match": int(eval_result["contains_excludes_match"]),

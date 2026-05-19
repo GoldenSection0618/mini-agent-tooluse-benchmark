@@ -98,6 +98,7 @@ def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
                 "result": None,
                 "latency_ms": 0.0,
                 "valid": False,
+                "ok": False,
                 "error": "unknown tool",
             }
             tool_calls.append(record)
@@ -120,6 +121,7 @@ def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
                 "result": None,
                 "latency_ms": 0.0,
                 "valid": False,
+                "ok": False,
                 "error": "tool not allowed",
             }
             tool_calls.append(record)
@@ -142,6 +144,7 @@ def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
                 "result": response.get("result"),
                 "latency_ms": response.get("latency_ms", 0.0),
                 "valid": True,
+                "ok": bool(response.get("ok", False)),
                 "error": response.get("error"),
             }
         )
