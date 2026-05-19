@@ -4,7 +4,7 @@ This repository implements a small-scale benchmark for evaluating LLM agent tool
 
 ## Motivation
 
-Simple final-answer matching can hide important agent failures. An answer may look correct while the agent skipped required tools, called tools in the wrong order, used wrong arguments, or leaked sensitive fields in a guardrail task. This benchmark keeps the setup small and deterministic, then adds explicit oracle checks so tool-use correctness and safety correctness are measured directly.
+Simple final-answer matching can hide important agent failures. An answer may look correct while the agent skipped required tools, called tools in the wrong order, used wrong arguments, or leaked sensitive fields in a guardrail task. This benchmark keeps the setup small and deterministic, then adds explicit oracle checks plus lightweight traces so tool-use correctness and safety correctness are measured directly.
 
 ## Benchmark Design
 
@@ -14,6 +14,7 @@ Simple final-answer matching can hide important agent failures. An answer may lo
 - Deterministic guardrail checker (`guardrails.py`)
 - Oracle evaluator (`evaluator.py`) with explicit sub-checks
 - End-to-end runner (`benchmark.py`) that writes `results.csv`
+- Lightweight tracing utilities (`tracing.py`) and trace inspector (`inspect_trace.py`)
 - Offline analysis (`analysis.py`) and figures (`figures/`)
 
 ## Task Types
@@ -51,16 +52,34 @@ For each task, `results.csv` logs:
 - `false_negative`
 - `leaked_pii_types`
 
+## Tracing
+
+Each task run produces a JSONL trace under `traces/{task_id}.jsonl`.
+
+The trace records `task_start`, `agent_decision`, `tool_call`, `tool_result`, `guardrail_check`, `evaluation`, and `task_end` events.
+
+This is a lightweight execution trace, not a full reasoning trace.
+
+## Failure Taxonomy
+
+High-level and detailed failures are both retained:
+
+- `failure_type`: one primary failure category used for high-level aggregation
+- `failure_flags`: all detected failure conditions for compound failure analysis
+
+`failure_flags` preserves secondary issues that a single `failure_type` can hide.
+
 ## Metrics
 
 `results.csv` includes operational metrics and oracle metrics:
 
 - identity: `task_id`, `task_type`, `task_subtype`
-- outcome: `success`, `failure_type`
+- outcome: `success`, `failure_type`, `failure_flags`
 - oracle checks: the fields listed above
 - efficiency: `wall_clock_time_ms`, `tool_latency_ms`, `tool_call_count`, `invalid_tool_call_count`, `retry_count`
 - usage proxy: `input_tokens`, `output_tokens`, `cost_usd`
 - safety flags: `guardrail_checked`, `guardrail_violation`
+- trace metrics: `trace_file`, `agent_step_count`, `tool_error_count`
 - diagnostics: `notes`, `eval_notes`
 
 ## Failure Types
@@ -80,6 +99,8 @@ For each task, `results.csv` logs:
 mini-agent-tooluse-benchmark/
 ├── README.md
 ├── benchmark.py
+├── tracing.py
+├── inspect_trace.py
 ├── evaluator.py
 ├── agent.py
 ├── tools.py
@@ -87,10 +108,13 @@ mini-agent-tooluse-benchmark/
 ├── tasks.json
 ├── results.csv
 ├── analysis.py
+├── traces/
+│   └── *.jsonl
 ├── figures/
 │   ├── latency_by_task_type.png
 │   ├── success_rate_by_task_type.png
 │   ├── failure_type_distribution.png
+│   ├── failure_flags_distribution.png
 │   └── oracle_metric_breakdown.png
 ├── requirements.txt
 └── memo.md
@@ -107,16 +131,21 @@ mamba install -n agent -y pandas matplotlib
 
 ```bash
 conda run -n agent python benchmark.py
+# or, after `conda activate agent`:
+python benchmark.py
 ```
 
 Output:
 
 - `results.csv` with exactly `24` data rows
+- `traces/*.jsonl` per task (`24` files)
 
 ## Run Analysis
 
 ```bash
 conda run -n agent python analysis.py
+# or, after `conda activate agent`:
+python analysis.py
 ```
 
 Outputs:
@@ -124,7 +153,14 @@ Outputs:
 - `figures/latency_by_task_type.png`
 - `figures/success_rate_by_task_type.png`
 - `figures/failure_type_distribution.png`
+- `figures/failure_flags_distribution.png`
 - `figures/oracle_metric_breakdown.png` (optional extension)
+
+## Inspect One Trace
+
+```bash
+python inspect_trace.py traces/plan_001.jsonl
+```
 
 ## Current Baseline Snapshot
 
@@ -141,6 +177,7 @@ From the latest deterministic baseline run:
 - Tools are deterministic mocks with limited domain coverage.
 - Guardrail detection is regex-based and intentionally simple.
 - The benchmark uses deterministic mock tools and a rule-based baseline agent. Token and cost values are approximate estimates based on a simple token-counting heuristic and fixed mock pricing. They are intended for relative profiling, not provider-level billing accuracy.
+- The traces focus on observable tool-use and evaluation events. They do not expose hidden model reasoning or claim to represent full cognitive trajectories.
 
 ## Next Steps
 
