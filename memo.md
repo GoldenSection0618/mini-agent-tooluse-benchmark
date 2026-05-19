@@ -1,71 +1,50 @@
-# Technical Memo: Oracle-Level Upgrade for Mini Agent Tool-Use Benchmark
+# Technical Memo: Tracing and Compound Failure Upgrade
 
 ## 1. Problem Definition
 
-This project is a small-scale, controlled benchmark for profiling agent tool-use behavior and failure modes. The primary issue addressed in this upgrade is that final-answer matching alone is not a sufficient oracle for agent quality. An agent can return a correct final answer while still violating core process requirements such as tool selection, tool order, argument correctness, or guardrail policy.
+This project is a small-scale controlled benchmark for profiling LLM agent tool-use efficiency, reliability, and guardrail failure cases. The benchmark is intentionally local and deterministic so evaluator behavior, logging behavior, and analysis behavior can be audited without external API variance.
 
-The upgrade goal is to keep the benchmark deterministic and local while strengthening evaluation quality through explicit oracle checks.
+Core problem addressed in this upgrade:
 
-Scope constraints:
+- final-answer accuracy alone is insufficient for agent evaluation
+- single-label failure summaries can hide compound errors
+- lack of execution trace makes debugging difficult
+
+Scope constraints remain unchanged:
 
 - exactly `24` tasks
-- exactly `8` `tool_use`, `8` `multi_step`, `8` `guardrail`
-- deterministic local mock tools
-- deterministic rule-based baseline agent
-- no dependency on external LLM APIs
+- `8` `tool_use`, `8` `multi_step`, `8` `guardrail`
+- deterministic mock tools
+- deterministic baseline rule-based agent
+- no real LLM API requirement
 
 ## 2. Benchmark Setup
 
-Repository components:
+Main components:
 
-- `tasks.json`: task definitions with explicit oracle metadata
-- `tools.py`: deterministic mock tools (calculator, lookup, JSON parsing, policy check)
-- `guardrails.py`: deterministic regex-based sensitive-data checker
-- `agent.py`: baseline rule-based agent
-- `evaluator.py`: oracle-level deterministic evaluator
-- `benchmark.py`: runner and result logger
-- `analysis.py`: summary statistics and figure generation
+- `tasks.json`: fixed task definitions with oracle metadata
+- `agent.py`: deterministic baseline tool-using agent
+- `tools.py`: deterministic mock tools
+- `guardrails.py`: deterministic pattern-based sensitive-data checker
+- `evaluator.py`: oracle checks + primary failure type + compound failure flags
+- `tracing.py`: JSONL trace event helpers
+- `benchmark.py`: task execution, trace writing, result logging
+- `analysis.py`: aggregate metrics and figures
+- `inspect_trace.py`: single-trace inspection helper
 
-The run path remains local and reproducible:
+Execution flow:
 
-1. load and validate task schema
-2. execute each task via baseline agent
-3. evaluate with oracle checks
-4. write `results.csv`
-5. aggregate and visualize with `analysis.py`
+1. validate task schema
+2. execute agent task
+3. run guardrail checks
+4. run evaluator checks
+5. write per-task trace file (`traces/{task_id}.jsonl`)
+6. append row to `results.csv`
+7. aggregate with `analysis.py`
 
 ## 3. Task Oracle Design
 
-Each task now carries explicit oracle fields beyond instruction and expected answer:
-
-- `required_tools`
-- `expected_tool_sequence`
-- `answer_type`
-- `tolerance`
-- `expected_answer_contains`
-- `expected_answer_excludes`
-- `guardrail_required`
-
-Multi-step tasks also include explicit step intent (`expected_steps`).
-
-Guardrail tasks include:
-
-- source policy (`policy`)
-- source expectation (`expected_violation`)
-- content constraints (`expected_answer_contains` / `expected_answer_excludes`)
-
-Guardrail mix includes:
-
-- email/phone redaction cases
-- address/ID-like redaction cases
-- direct sensitive-field request refusal cases
-- false-positive control cases with non-sensitive operational text
-
-## 4. Metrics and Logging
-
-`results.csv` now logs both operational and oracle metrics.
-
-Core oracle metrics:
+Success is decomposed into explicit checks rather than final answer only:
 
 - `final_answer_correct`
 - `required_tools_called`
@@ -74,92 +53,115 @@ Core oracle metrics:
 - `planning_success`
 - `format_correct`
 - `contains_excludes_match`
-- `guardrail_success`
-- `false_positive`
-- `false_negative`
-- `leaked_pii_types`
+- `guardrail_success` (where required)
 
-Operational metrics remain:
+This prevents “correct answer by incorrect process” from being counted as full success.
 
-- latency (`wall_clock_time_ms`, `tool_latency_ms`)
-- call behavior (`tool_call_count`, `invalid_tool_call_count`, `retry_count`)
-- usage proxy (`input_tokens`, `output_tokens`, `cost_usd`)
+## 4. Trace Design
 
-Success is now decomposed and strictly conjunctive:
+Each task writes a JSONL trace under `traces/`.
 
-- final-answer correctness
-- tool-use correctness
-- planning correctness
-- guardrail correctness (when required)
+Required event types:
 
-This removes ambiguity from “correct by coincidence” outcomes.
+- `task_start`
+- `agent_decision`
+- `tool_call`
+- `tool_result`
+- `guardrail_check`
+- `evaluation`
+- `task_end`
 
-## 5. Experimental Results
+Each event contains base fields (`task_id`, `step`, `event_type`, `timestamp`) and optional payload fields depending on event type.
 
-Values below come directly from regenerated `results.csv` after oracle upgrade.
+Trace metrics logged in `results.csv`:
 
-Dataset-level results:
+- `trace_file`
+- `agent_step_count`
+- `tool_error_count`
 
-- tasks: `24`
-- overall success: `100.0%` (`24/24`)
-- failure distribution: `none=24`
+From regenerated results:
 
-By task type (all at `100.0%`):
+- average `agent_step_count` by task type:
+  - `tool_use`: `5.0`
+  - `multi_step`: `8.25`
+  - `guardrail`: `6.0`
+- `tool_error_count` summary:
+  - total tool errors: `8`
+  - tasks with tool errors: `8`
 
-- success rate
-- final-answer correctness
-- tool-sequence match rate
-- tool-argument match rate
-- planning success rate
+## 5. Failure Taxonomy
 
-Guardrail-specific:
+Two layers are logged:
 
+- `failure_type`: one primary category for high-level aggregation
+- `failure_flags`: list of all detected machine-readable issues
+
+Primary categories currently used:
+
+- `none`
+- `planning_error`
+- `tool_misuse`
+- `wrong_calculation`
+- `answer_mismatch`
+- `hallucinated_result`
+- `policy_miss`
+- `format_error`
+
+## 6. Failure Flags and Compound Errors
+
+`failure_flags` preserves secondary failure modes that a single primary label cannot represent.
+
+Examples of supported flags:
+
+- `required_tool_missing`
+- `unexpected_tool_used`
+- `tool_sequence_mismatch`
+- `tool_argument_mismatch`
+- `wrong_numeric_answer`
+- `answer_mismatch`
+- `format_mismatch`
+- `contains_required_text_missing`
+- `excluded_text_leaked`
+- `guardrail_false_positive`
+- `guardrail_false_negative`
+- `pii_leak_email`
+- `pii_leak_phone`
+- `pii_leak_address`
+- `pii_leak_id`
+- `hallucinated_without_tool`
+
+Current run outcome (from regenerated `results.csv`):
+
+- `24/24` tasks successful
+- failure type distribution: `none=24`
+- failure flags distribution: empty (`{}`)
 - guardrail false positives: `0`
 - guardrail false negatives: `0`
 
-Latency (average, ms):
+Even with no current failures, flags remain useful for future model-backed regressions where one task may exhibit multiple simultaneous faults.
 
-- wall-clock: `tool_use=0.046675`, `multi_step=0.0423125`, `guardrail=0.0164875`
-- tool latency: `tool_use=0.01505`, `multi_step=0.016925`, `guardrail=0.000575`
+## 7. Metrics, Results, and Limitations
 
-Usage proxy:
+Latest regenerated run (`results.csv`):
 
-- total estimated cost: `$0.000873`
-- average estimated cost per task: `$0.000036375`
-- average tool calls: `tool_use=1.0`, `multi_step=2.625`, `guardrail=1.0`
+- overall success: `100.0%` (`24/24`)
+- by-task-type success: all `100.0%`
+- average wall-clock latency (ms):
+  - `tool_use=0.0579125`
+  - `multi_step=0.05165`
+  - `guardrail=0.0297`
+- average tool latency (ms):
+  - `tool_use=0.00975`
+  - `multi_step=0.013775`
+  - `guardrail=0.00045`
+- estimated total cost: `$0.000873`
 
-Figures generated:
+Limitations:
 
-- `figures/latency_by_task_type.png`
-- `figures/success_rate_by_task_type.png`
-- `figures/failure_type_distribution.png`
-- `figures/oracle_metric_breakdown.png`
+- deterministic baseline agent is not equivalent to open-ended LLM behavior
+- traces capture observable execution events, not hidden reasoning
+- mock tools and regex guardrails are intentionally simple
+- token/cost values are heuristic estimates for relative profiling, not provider billing
+- benchmark size is intentionally small (`24` tasks)
 
-## 6. Failure Case Analysis
-
-In the latest run, no failures are observed (`24/24`). This should be interpreted carefully:
-
-- the baseline agent is deterministic and aligned to the deterministic task schema
-- this run confirms internal consistency of task schema, execution, oracle checks, and logging
-- it does not imply generalization to unseen instructions or real model behavior
-
-The improved oracle remains valuable even in all-pass runs because it creates explicit diagnostics if regressions appear later. For example, a future model-backed agent can fail sequence/argument/guardrail checks even when final-answer accuracy appears high.
-
-## 7. Limitations and Extensions
-
-Current limitations:
-
-- small task count (`24`) by design
-- rule-based baseline agent, not a stochastic LLM agent
-- regex-based guardrail checks (not a comprehensive privacy classifier)
-- deterministic mock tools with narrow domain coverage
-- token and cost are approximate heuristics, not provider billing measurements
-
-Planned extensions:
-
-- add pluggable model-backed agents while keeping the same oracle interface
-- evaluate multiple runs for non-deterministic agents and report confidence intervals
-- expand adversarial cases for tool misuse and guardrail bypass
-- add CI regression thresholds on oracle sub-metrics, not only final success
-
-This benchmark should be treated as a controlled harness for profiling tool-use efficiency and failure cases, not as a full-scale benchmark of real-world agent capability.
+This benchmark should be treated as a controlled profiling harness, not as a full-scale real-world capability benchmark.
