@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -60,6 +61,24 @@ def _plot_failure_distribution(df: pd.DataFrame) -> None:
     plt.close()
 
 
+def _plot_failure_flags_distribution(df: pd.DataFrame) -> None:
+    flags = []
+    for raw in df["failure_flags"]:
+        parsed = json.loads(raw)
+        flags.extend(parsed)
+
+    counts = pd.Series(flags).value_counts().sort_index() if flags else pd.Series(dtype="int64")
+    plt.figure(figsize=(10, 5))
+    if not counts.empty:
+        plt.bar(counts.index, counts.values)
+        plt.xticks(rotation=30, ha="right")
+    plt.ylabel("Count")
+    plt.title("Failure Flags Distribution")
+    plt.tight_layout()
+    plt.savefig(FIG_DIR / "failure_flags_distribution.png", dpi=150)
+    plt.close()
+
+
 def _plot_oracle_metric_breakdown(df: pd.DataFrame) -> None:
     metrics = [
         "success",
@@ -100,10 +119,21 @@ def main() -> None:
     avg_wall_clock = df.groupby("task_type")["wall_clock_time_ms"].mean().to_dict()
     avg_tool_latency = df.groupby("task_type")["tool_latency_ms"].mean().to_dict()
     failure_dist = df["failure_type"].value_counts().to_dict()
+    avg_agent_steps = df.groupby("task_type")["agent_step_count"].mean().to_dict()
+    tool_error_summary = {
+        "total_tool_errors": int(df["tool_error_count"].sum()),
+        "tasks_with_tool_errors": int((df["tool_error_count"] > 0).sum()),
+    }
+
+    failure_flags = []
+    for raw in df["failure_flags"]:
+        failure_flags.extend(json.loads(raw))
+    failure_flags_dist = pd.Series(failure_flags).value_counts().to_dict() if failure_flags else {}
 
     _plot_latency_by_task_type(df)
     _plot_success_rate(df)
     _plot_failure_distribution(df)
+    _plot_failure_flags_distribution(df)
     _plot_oracle_metric_breakdown(df)
 
     print(f"Overall success rate: {overall_success_rate:.2f}%")
@@ -116,6 +146,9 @@ def main() -> None:
     print(f"Average wall-clock latency by task type (ms): {avg_wall_clock}")
     print(f"Average tool latency by task type (ms): {avg_tool_latency}")
     print(f"Failure type distribution: {failure_dist}")
+    print(f"Failure flags distribution: {failure_flags_dist}")
+    print(f"Average agent step count by task type: {avg_agent_steps}")
+    print(f"Tool error count summary: {tool_error_summary}")
 
 
 if __name__ == "__main__":
