@@ -12,6 +12,7 @@ from typing import Any, Dict, List
 from agent import run_task
 from evaluator import evaluate_task
 from guardrails import check_guardrail
+from tracing import make_trace_path, new_event, write_trace_event
 
 
 RESULT_COLUMNS = [
@@ -41,6 +42,9 @@ RESULT_COLUMNS = [
     "false_negative",
     "leaked_pii_types",
     "failure_type",
+    "trace_file",
+    "agent_step_count",
+    "tool_error_count",
     "notes",
     "eval_notes",
 ]
@@ -134,17 +138,73 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
     rows: List[Dict[str, Any]] = []
 
     for task in tasks:
+        task_id = task["id"]
+        trace_path = make_trace_path(task_id)
+        Path(trace_path).write_text("", encoding="utf-8")
+        trace_step = 0
+
+        def append_trace(event_type: str, **kwargs: Any) -> None:
+            nonlocal trace_step
+            trace_step += 1
+            write_trace_event(trace_path, new_event(task_id=task_id, step=trace_step, event_type=event_type, **kwargs))
+
+        append_trace(
+            "task_start",
+            task_type=task["type"],
+            task_subtype=task.get("subtype", ""),
+            instruction=task["instruction"],
+        )
+
         start = time.perf_counter()
         agent_result = run_task(task)
         wall_clock_time_ms = (time.perf_counter() - start) * 1000
+        for event in agent_result.get("trace_events", []):
+            payload = dict(event)
+            payload.pop("task_id", None)
+            payload.pop("step", None)
+            payload.pop("timestamp", None)
+            payload.pop("event_type", None)
+            append_trace(event.get("event_type", "agent_decision"), **payload)
 
         guardrail_result = _run_guardrail_checks(task, str(agent_result.get("final_answer", "")))
+        if task.get("guardrail_required", False):
+            append_trace(
+                "guardrail_check",
+                policy=task.get("policy", ""),
+                checked=guardrail_result.get("checked", False),
+                source_violation=guardrail_result.get("source_violation", False),
+                violation=guardrail_result.get("output_violation", False),
+                violation_types=guardrail_result.get("output_violation_types", []),
+                notes=guardrail_result.get("notes", ""),
+            )
         eval_result = evaluate_task(task, agent_result, guardrail_result)
+        append_trace(
+            "evaluation",
+            checks={
+                "final_answer_correct": eval_result["final_answer_correct"],
+                "required_tools_called": eval_result["required_tools_called"],
+                "tool_sequence_match": eval_result["tool_sequence_match"],
+                "tool_argument_match": eval_result["tool_argument_match"],
+                "planning_success": eval_result["planning_success"],
+                "format_correct": eval_result["format_correct"],
+                "contains_excludes_match": eval_result["contains_excludes_match"],
+                "guardrail_success": eval_result["guardrail_success"],
+            },
+            failure_type=eval_result["failure_type"],
+            notes=eval_result.get("eval_notes", ""),
+        )
         failure_type = eval_result["failure_type"]
         if failure_type not in FAILURE_TYPES:
             raise ValueError(f"invalid failure type: {failure_type}")
 
         tool_latency_ms = sum(float(call.get("latency_ms", 0.0)) for call in agent_result["tool_calls"])
+        tool_error_count = sum(
+            1
+            for call in agent_result["tool_calls"]
+            if (not bool(call.get("valid", False))) or bool(call.get("error"))
+        )
+        guardrail_step_count = 1 if task.get("guardrail_required", False) else 0
+        agent_step_count = len(agent_result.get("trace_events", [])) + guardrail_step_count + 1
         notes = "; ".join(
             filter(
                 None,
@@ -181,9 +241,18 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
             "false_negative": int(eval_result["false_negative"]),
             "leaked_pii_types": "|".join(eval_result["leaked_pii_types"]),
             "failure_type": failure_type,
+            "trace_file": trace_path,
+            "agent_step_count": agent_step_count,
+            "tool_error_count": tool_error_count,
             "notes": notes,
             "eval_notes": eval_result.get("eval_notes", ""),
         }
+        append_trace(
+            "task_end",
+            success=bool(eval_result["success"]),
+            failure_type=failure_type,
+            notes=notes,
+        )
         rows.append(row)
 
     with output_path.open("w", newline="", encoding="utf-8") as f:
