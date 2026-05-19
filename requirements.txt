@@ -1,2 +1,3 @@
+# LM Studio client uses Python stdlib urllib (no extra HTTP dependency)
 pandas
 matplotlib
