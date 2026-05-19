@@ -11,9 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
-from agent import run_task
+from agent import LocalLLMAgent, RuleBasedAgent
 from evaluator import evaluate_task
 from guardrails import check_guardrail
+from llm_clients import LMStudioClient
 from tracing import make_trace_path, new_event, write_trace_event
 
 
@@ -81,6 +82,7 @@ def _load_json_config(path: str | None) -> Dict[str, Any]:
 def _get_runtime_settings(args: argparse.Namespace) -> Dict[str, Any]:
     file_cfg = _load_json_config(args.config)
     lm_cfg = file_cfg.get("lmstudio", {})
+    pricing_cfg = file_cfg.get("mock_pricing", {})
     backend_from_cfg = file_cfg.get("agent_backend")
 
     backend = args.agent or backend_from_cfg or "rule_based"
@@ -103,7 +105,44 @@ def _get_runtime_settings(args: argparse.Namespace) -> Dict[str, Any]:
         "temperature": temperature,
         "max_tokens": max_tokens,
         "timeout_seconds": timeout_seconds,
+        "input_cost_per_token_usd": float(pricing_cfg.get("input_cost_per_token_usd", 0.000001)),
+        "output_cost_per_token_usd": float(pricing_cfg.get("output_cost_per_token_usd", 0.000003)),
     }
+
+
+def _build_agent(settings: Dict[str, Any]) -> tuple[Any, str]:
+    backend = str(settings["agent"])
+    if backend == "rule_based":
+        return (
+            RuleBasedAgent(
+                input_cost_per_token_usd=float(settings["input_cost_per_token_usd"]),
+                output_cost_per_token_usd=float(settings["output_cost_per_token_usd"]),
+            ),
+            "rule_based",
+        )
+
+    client = LMStudioClient(
+        base_url=str(settings["base_url"]),
+        chat_endpoint=str(settings["chat_endpoint"]),
+        model=str(settings["model"]),
+        temperature=float(settings["temperature"]),
+        max_tokens=int(settings["max_tokens"]),
+        timeout_seconds=int(settings["timeout_seconds"]),
+    )
+    preflight = client.chat("Reply with OK only.", "ping")
+    if not preflight.get("ok", False):
+        raise RuntimeError(
+            f"LM Studio backend is not reachable at {client.chat_url}. "
+            "Start LM Studio server or use --agent rule_based."
+        )
+    return (
+        LocalLLMAgent(
+            client=client,
+            input_cost_per_token_usd=float(settings["input_cost_per_token_usd"]),
+            output_cost_per_token_usd=float(settings["output_cost_per_token_usd"]),
+        ),
+        str(settings["model"]),
+    )
 
 
 def validate_tasks_schema(tasks: List[Dict[str, Any]]) -> None:
@@ -189,7 +228,8 @@ def run_benchmark(
 ) -> List[Dict[str, Any]]:
     settings = settings or {}
     agent_backend = str(settings.get("agent", "rule_based"))
-    model_name = "rule_based" if agent_backend == "rule_based" else str(settings.get("model", ""))
+    agent, resolved_model_name = _build_agent(settings)
+    model_name = "rule_based" if agent_backend == "rule_based" else resolved_model_name
     temperature = settings.get("temperature", 0 if agent_backend == "rule_based" else "")
     max_tokens = "" if agent_backend == "rule_based" else settings.get("max_tokens", 512)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -223,12 +263,23 @@ def run_benchmark(
         )
 
         start = time.perf_counter()
-        if agent_backend == "rule_based":
-            agent_result = run_task(task)
-        else:
-            raise NotImplementedError(
-                "LM Studio backend wiring is not available yet. Use --agent rule_based for now."
-            )
+        try:
+            agent_result = agent.run_task(task)
+        except Exception as exc:
+            agent_result = {
+                "final_answer": "",
+                "tool_calls": [],
+                "trace_events": [],
+                "agent_step_count": 0,
+                "invalid_tool_call_count": 0,
+                "retry_count": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost_usd": 0.0,
+                "notes": f"agent_runtime_error: {exc}",
+                "llm_decision_time_ms": 0.0,
+                "raw_model_outputs": [],
+            }
         wall_clock_time_ms = (time.perf_counter() - start) * 1000
         for event in agent_result.get("trace_events", []):
             payload = dict(event)
@@ -360,7 +411,11 @@ def main() -> None:
     parser = _build_arg_parser()
     args = parser.parse_args()
     settings = _get_runtime_settings(args)
-    rows = run_benchmark(settings=settings)
+    try:
+        rows = run_benchmark(settings=settings)
+    except RuntimeError as exc:
+        print(str(exc))
+        raise SystemExit(1) from exc
     print(f"Wrote results.csv with {len(rows)} rows")
 
 
