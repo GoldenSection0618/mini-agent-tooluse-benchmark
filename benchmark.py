@@ -143,10 +143,12 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
         trace_path = make_trace_path(task_id)
         Path(trace_path).write_text("", encoding="utf-8")
         trace_step = 0
+        trace_start = time.perf_counter()
 
         def append_trace(event_type: str, **kwargs: Any) -> None:
             nonlocal trace_step
             trace_step += 1
+            kwargs["step_time_ms"] = (time.perf_counter() - trace_start) * 1000
             write_trace_event(trace_path, new_event(task_id=task_id, step=trace_step, event_type=event_type, **kwargs))
 
         append_trace(

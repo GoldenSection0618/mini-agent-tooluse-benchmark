@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -34,11 +33,12 @@ def new_event(task_id: str, step: int, event_type: str, **kwargs: Any) -> Dict[s
     if event_type not in ALLOWED_EVENT_TYPES:
         raise ValueError(f"unsupported event_type: {event_type}")
 
+    step_time_ms = kwargs.pop("step_time_ms", None)
     event: Dict[str, Any] = {
         "task_id": task_id,
         "step": int(step),
         "event_type": event_type,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "step_time_ms": float(step_time_ms) if step_time_ms is not None else 0.0,
     }
     event.update(kwargs)
     return event
