@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any, Dict, List
 
 from llm_clients import LMStudioClient
@@ -377,7 +378,18 @@ class LocalLLMAgent:
             ensure_ascii=True,
         )
 
-        emit("agent_decision", backend="lmstudio", model_name=self.client.model, phase="action_selection", notes="request")
+        action_phase_start = time.perf_counter()
+        emit(
+            "agent_decision",
+            backend="lmstudio",
+            model_name=self.client.model,
+            phase="action_selection",
+            elapsed_ms=0.0,
+            llm_latency_ms=0.0,
+            parse_ok=False,
+            retry_index=retry_count,
+            notes="request",
+        )
         action_resp = self.client.chat(action_system_prompt, action_input)
         llm_decision_time_ms += float(action_resp.get("latency_ms", 0.0))
         action_text = str(action_resp.get("content", ""))
@@ -410,9 +422,12 @@ class LocalLLMAgent:
             backend="lmstudio",
             model_name=self.client.model,
             phase="action_selection",
+            elapsed_ms=round((time.perf_counter() - action_phase_start) * 1000, 4),
+            llm_latency_ms=float(action_resp.get("latency_ms", 0.0)),
             parse_ok=parse_ok,
             retry_index=retry_count,
             model_output_preview=action_text[:500],
+            notes="response",
         )
 
         if not parse_ok:
@@ -450,7 +465,18 @@ class LocalLLMAgent:
                 }
                 final_system_prompt = "You are an answer generator. Return JSON only with keys final_answer and notes."
                 final_input = json.dumps(observation_payload, ensure_ascii=True)
-                emit("agent_decision", backend="lmstudio", model_name=self.client.model, phase="final_answer", notes="request")
+                final_phase_start = time.perf_counter()
+                emit(
+                    "agent_decision",
+                    backend="lmstudio",
+                    model_name=self.client.model,
+                    phase="final_answer",
+                    elapsed_ms=0.0,
+                    llm_latency_ms=0.0,
+                    parse_ok=False,
+                    retry_index=retry_count,
+                    notes="request",
+                )
                 final_resp = self.client.chat(final_system_prompt, final_input)
                 llm_decision_time_ms += float(final_resp.get("latency_ms", 0.0))
                 final_text = str(final_resp.get("content", ""))
@@ -468,9 +494,12 @@ class LocalLLMAgent:
                     backend="lmstudio",
                     model_name=self.client.model,
                     phase="final_answer",
+                    elapsed_ms=round((time.perf_counter() - final_phase_start) * 1000, 4),
+                    llm_latency_ms=float(final_resp.get("latency_ms", 0.0)),
                     parse_ok=bool(final_answer),
                     retry_index=retry_count,
                     model_output_preview=final_text[:500],
+                    notes="response",
                 )
             else:
                 final_answer = str(proposed_final)
