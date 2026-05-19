@@ -147,13 +147,13 @@ Latest regenerated run (`results.csv`):
 - overall success: `100.0%` (`24/24`)
 - by-task-type success: all `100.0%`
 - average wall-clock latency (ms):
-  - `tool_use=0.0579125`
-  - `multi_step=0.05165`
-  - `guardrail=0.0297`
+  - `tool_use=0.047225`
+  - `multi_step=0.0528`
+  - `guardrail=0.025375`
 - average tool latency (ms):
-  - `tool_use=0.00975`
-  - `multi_step=0.013775`
-  - `guardrail=0.00045`
+  - `tool_use=0.0082375`
+  - `multi_step=0.014175`
+  - `guardrail=0.000375`
 - estimated total cost: `$0.000873`
 
 Limitations:
