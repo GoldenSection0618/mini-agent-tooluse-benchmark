@@ -242,7 +242,7 @@ def run_benchmark(tasks_path: Path = Path("tasks.json"), output_path: Path = Pat
             "false_negative": int(eval_result["false_negative"]),
             "leaked_pii_types": "|".join(eval_result["leaked_pii_types"]),
             "failure_type": failure_type,
-            "failure_flags": eval_result.get("failure_flags", []),
+            "failure_flags": json.dumps(eval_result.get("failure_flags", []), ensure_ascii=True),
             "trace_file": trace_path,
             "agent_step_count": agent_step_count,
             "tool_error_count": tool_error_count,
