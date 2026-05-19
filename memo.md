@@ -1,167 +1,160 @@
-# Technical Memo: Tracing and Compound Failure Upgrade
+# Technical Memo: Local LM Studio Backend Integration
 
 ## 1. Problem Definition
 
-This project is a small-scale controlled benchmark for profiling LLM agent tool-use efficiency, reliability, and guardrail failure cases. The benchmark is intentionally local and deterministic so evaluator behavior, logging behavior, and analysis behavior can be audited without external API variance.
+This repository is a small-scale controlled benchmark for profiling LLM agent tool-use efficiency, reliability, and guardrail failure cases. The benchmark is intentionally local-first, deterministic where possible, and limited to `24` fixed tasks.
 
-Core problem addressed in this upgrade:
+Why this matters:
 
-- final-answer accuracy alone is insufficient for agent evaluation
-- single-label failure summaries can hide compound errors
-- lack of execution trace makes debugging difficult
+- final-answer accuracy alone is not enough
+- tool-use process errors can be hidden by seemingly correct outputs
+- single-label failures can hide compound issues
 
-Scope constraints remain unchanged:
-
-- exactly `24` tasks
-- `8` `tool_use`, `8` `multi_step`, `8` `guardrail`
-- deterministic mock tools
-- deterministic baseline rule-based agent
-- no real LLM API requirement
+The benchmark therefore logs oracle checks, per-task traces, and compound failure flags.
 
 ## 2. Benchmark Setup
 
-Main components:
+Task split remains fixed:
 
-- `tasks.json`: fixed task definitions with oracle metadata
-- `agent.py`: deterministic baseline tool-using agent
+- `8` tool_use
+- `8` multi_step
+- `8` guardrail
+
+Core components:
+
+- `benchmark.py`: runner, backend selection, CSV logging
+- `agent.py`: `RuleBasedAgent` and `LocalLLMAgent`
+- `llm_clients.py`: LM Studio REST v1 client (`/api/v1/chat`)
 - `tools.py`: deterministic mock tools
-- `guardrails.py`: deterministic pattern-based sensitive-data checker
-- `evaluator.py`: oracle checks + primary failure type + compound failure flags
-- `tracing.py`: JSONL trace event helpers
-- `benchmark.py`: task execution, trace writing, result logging
-- `analysis.py`: aggregate metrics and figures
-- `inspect_trace.py`: single-trace inspection helper
+- `guardrails.py`: deterministic sensitive-data checks
+- `evaluator.py`: oracle checks + primary failure + compound flags
+- `tracing.py`: JSONL trace writer
+- `analysis.py`: aggregation and plotting
 
-Execution flow:
+## 3. Local LLM Backend
 
-1. validate task schema
-2. execute agent task
-3. run guardrail checks
-4. run evaluator checks
-5. write per-task trace file (`traces/{task_id}.jsonl`)
-6. append row to `results.csv`
-7. aggregate with `analysis.py`
+### 3.1 Why LM Studio was added
 
-## 3. Task Oracle Design
+A local LLM backend was added to evaluate real model-driven tool planning without requiring external cloud APIs. This preserves offline operation and reduces network/provider variability.
 
-Success is decomposed into explicit checks rather than final answer only:
+### 3.2 Why rule_based baseline is retained
 
-- `final_answer_correct`
-- `required_tools_called`
-- `tool_sequence_match`
-- `tool_argument_match`
-- `planning_success`
-- `format_correct`
-- `contains_excludes_match`
-- `guardrail_success` (where required)
+The rule-based backend remains necessary as a deterministic sanity baseline:
 
-This prevents “correct answer by incorrect process” from being counted as full success.
+- validates benchmark mechanics
+- provides stable regression control
+- isolates evaluator or schema regressions from model variability
 
-## 4. Trace Design
+### 3.3 What local backend measures
 
-Each task writes a JSONL trace under `traces/`.
+The local backend can measure:
 
-Required event types:
+- model-driven tool selection quality
+- tool argument quality
+- structured-output robustness (JSON action protocol)
+- guardrail outcomes under model-generated answers
+- local end-to-end latency profiles
 
-- `task_start`
-- `agent_decision`
-- `tool_call`
-- `tool_result`
-- `guardrail_check`
-- `evaluation`
-- `task_end`
+### 3.4 What local backend does not measure
 
-Each event contains base fields (`task_id`, `step`, `event_type`, `timestamp`) and optional payload fields depending on event type.
+It does not measure hidden model reasoning quality directly. The benchmark reports observable traces and oracle outcomes only.
 
-Trace metrics logged in `results.csv`:
+## 4. Oracle Evaluation and Failure Taxonomy
 
-- `trace_file`
-- `agent_step_count`
-- `tool_error_count`
+Success is decomposed into explicit checks:
 
-From regenerated results:
+- final-answer correctness
+- required tool usage
+- tool sequence correctness
+- tool argument correctness
+- tool execution success
+- planning success
+- format correctness
+- contains/excludes constraints
+- guardrail success
 
-- average `agent_step_count` by task type:
-  - `tool_use`: `5.0`
-  - `multi_step`: `8.25`
-  - `guardrail`: `6.0`
-- `tool_error_count` summary:
-  - total tool errors: `8`
-  - tasks with tool errors: `8`
+Failure reporting has two layers:
 
-## 5. Failure Taxonomy
+- `failure_type`: one primary category for aggregate plots
+- `failure_flags`: all detected failure conditions for compound error analysis
 
-Two layers are logged:
+This design avoids under-reporting multi-cause failures.
 
-- `failure_type`: one primary category for high-level aggregation
-- `failure_flags`: list of all detected machine-readable issues
+## 5. Trace Methodology
 
-Primary categories currently used:
+Each task writes a JSONL trace with observable events:
 
-- `none`
-- `planning_error`
-- `tool_misuse`
-- `wrong_calculation`
-- `answer_mismatch`
-- `hallucinated_result`
-- `policy_miss`
-- `format_error`
+- task_start
+- agent_decision
+- tool_call
+- tool_result
+- guardrail_check
+- evaluation
+- task_end
 
-## 6. Failure Flags and Compound Errors
+For LM Studio mode, agent decision events include backend/model/phase metadata and compact model output previews.
 
-`failure_flags` preserves secondary failure modes that a single primary label cannot represent.
+Methodology note:
 
-Examples of supported flags:
+The benchmark reports observable tool-use traces and oracle-level evaluation results. It does not expose hidden model reasoning. Local LLM traces record prompts, compact action decisions, tool calls, tool results, guardrail checks, and evaluator outputs.
 
-- `required_tool_missing`
-- `unexpected_tool_used`
-- `tool_sequence_mismatch`
-- `tool_argument_mismatch`
-- `wrong_numeric_answer`
-- `answer_mismatch`
-- `format_mismatch`
-- `contains_required_text_missing`
-- `excluded_text_leaked`
-- `guardrail_false_positive`
-- `guardrail_false_negative`
-- `pii_leak_email`
-- `pii_leak_phone`
-- `pii_leak_address`
-- `pii_leak_id`
-- `hallucinated_without_tool`
+## 6. Experimental Results
 
-Current run outcome (from regenerated `results.csv`):
+### 6.1 Rule-based results (generated)
 
-- `24/24` tasks successful
+From `results_rule_based.csv` (latest run):
+
+- total tasks: `24`
+- overall success: `100%`
 - failure type distribution: `none=24`
-- failure flags distribution: empty (`{}`)
 - guardrail false positives: `0`
 - guardrail false negatives: `0`
+- average wall-clock latency by task type (ms):
+  - tool_use: `0.0639875`
+  - multi_step: `0.0656`
+  - guardrail: `0.0509`
+- average tool latency by task type (ms):
+  - tool_use: `0.018175`
+  - multi_step: `0.0265125`
+  - guardrail: `0.01805`
 
-Even with no current failures, flags remain useful for future model-backed regressions where one task may exhibit multiple simultaneous faults.
+### 6.2 LM Studio results status
 
-## 7. Metrics, Results, and Limitations
+LM Studio backend support is implemented in code, including endpoint configuration, preflight check, structured two-phase prompting, and trace integration. LM Studio result generation depends on local server availability.
 
-Latest regenerated run (`results.csv`):
+If `results_lmstudio.csv` is not present for a run session, report status as implemented but not generated.
 
-- overall success: `100.0%` (`24/24`)
-- by-task-type success: all `100.0%`
-- average wall-clock latency (ms):
-  - `tool_use=0.047225`
-  - `multi_step=0.0528`
-  - `guardrail=0.025375`
-- average tool latency (ms):
-  - `tool_use=0.0082375`
-  - `multi_step=0.014175`
-  - `guardrail=0.000375`
-- estimated total cost: `$0.000873`
+## 7. Variance and Reproducibility
 
-Limitations:
+Using local LM Studio reduces:
 
-- deterministic baseline agent is not equivalent to open-ended LLM behavior
-- traces capture observable execution events, not hidden reasoning
-- mock tools and regex guardrails are intentionally simple
-- token/cost values are heuristic estimates for relative profiling, not provider billing
-- benchmark size is intentionally small (`24` tasks)
+- network-induced latency variance
+- provider queue/rate-limit effects
+- provider-side silent model updates
 
-This benchmark should be treated as a controlled profiling harness, not as a full-scale real-world capability benchmark.
+Remaining variance sources include:
+
+- local hardware load
+- model load state and caching
+- quantization/runtime backend differences
+- context length and decoding behavior
+- thermal throttling
+- LM Studio server overhead
+
+Token and cost values are approximate heuristic estimates for relative profiling, not billing-accurate metering.
+
+## 8. Limitations and Extensions
+
+Current limitations:
+
+- small benchmark size (`24` tasks)
+- deterministic mock tools
+- regex-style guardrails
+- no hidden-reasoning access
+
+Next extensions:
+
+- generate and compare `results_lmstudio.csv` under fixed local setup
+- compare multiple local models/settings
+- add CI checks for backend-specific regressions
+- add stricter per-field output validators for LM-generated JSON actions
