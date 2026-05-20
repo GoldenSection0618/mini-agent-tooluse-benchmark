@@ -1,0 +1,4 @@
+agent_backend,failure_type,count
+deepseek,hallucinated_result,21
+deepseek,none,2
+deepseek,tool_misuse,1

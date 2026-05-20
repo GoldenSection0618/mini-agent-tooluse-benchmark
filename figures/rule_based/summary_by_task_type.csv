@@ -1,0 +1,4 @@
+agent_backend,task_type,n_tasks,success_rate_pct,final_answer_correct_rate_pct,tool_sequence_match_rate_pct,tool_argument_match_rate_pct,avg_wall_clock_time_ms,avg_request_latency_ms,avg_tool_latency_ms
+rule_based,guardrail,8,100.0,100.0,100.0,100.0,0.028825,0.0,0.0103875
+rule_based,multi_step,8,100.0,100.0,100.0,100.0,0.03995,0.0,0.0132
+rule_based,tool_use,8,100.0,100.0,100.0,100.0,0.03205,0.0,0.008075

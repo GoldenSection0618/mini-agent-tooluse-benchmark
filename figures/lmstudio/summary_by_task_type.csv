@@ -1,0 +1,4 @@
+agent_backend,task_type,n_tasks,success_rate_pct,final_answer_correct_rate_pct,tool_sequence_match_rate_pct,tool_argument_match_rate_pct,avg_wall_clock_time_ms,avg_request_latency_ms,avg_tool_latency_ms
+lmstudio,guardrail,8,0.0,0.0,0.0,0.0,26122.7995,26122.4567,0.0
+lmstudio,multi_step,8,0.0,0.0,0.0,0.0,34395.96205,34395.607625000004,0.0
+lmstudio,tool_use,8,0.0,0.0,0.0,0.0,22599.9999875,22599.666325,0.0

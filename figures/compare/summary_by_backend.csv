@@ -1,0 +1,4 @@
+agent_backend,n_tasks,success_rate_pct,final_answer_correct_rate_pct,avg_wall_clock_time_ms,avg_request_latency_ms,avg_tool_latency_ms
+deepseek,24,8.333333333333332,37.5,7146.204699999999,7062.077379166666,0.005929166666666666
+lmstudio,24,0.0,0.0,27706.253845833333,27705.910216666667,0.0
+rule_based,24,100.0,100.0,0.03360833333333333,0.0,0.010554166666666668

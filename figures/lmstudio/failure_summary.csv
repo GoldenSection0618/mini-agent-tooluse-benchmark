@@ -1,0 +1,3 @@
+agent_backend,failure_type,count
+lmstudio,hallucinated_result,12
+lmstudio,tool_misuse,12
