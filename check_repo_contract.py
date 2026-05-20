@@ -8,6 +8,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from agent import _build_llm_task_payload
 from benchmark import RESULT_COLUMNS
 
 
@@ -19,6 +20,25 @@ FORBIDDEN_PATTERNS = [
     "parallel map",
     "batch request",
 ]
+
+FORBIDDEN_ORACLE_PAYLOAD_FIELDS = {
+    "expected_answer",
+    "expected_tool_sequence",
+    "expected_steps",
+    "tolerance",
+    "answer_type",
+    "expected_answer_contains",
+    "expected_answer_excludes",
+}
+
+ALLOWED_PAYLOAD_TOP_LEVEL_FIELDS = {
+    "task_id",
+    "task_type",
+    "instruction",
+    "allowed_tools",
+    "tool_schemas",
+    "task_context",
+}
 
 
 def load_json(path: Path) -> Any:
@@ -51,6 +71,49 @@ def check_tasks() -> None:
                 assert field in t, f"guardrail task {t_id} missing {field}"
 
 
+def check_llm_payload_contract() -> None:
+    tasks = load_json(Path("tasks.json"))
+    for task in tasks:
+        task_id = task.get("id", "<unknown>")
+        allowed_tools = set(task.get("allowed_tools", []))
+        payload = _build_llm_task_payload(task, allowed_tools)
+
+        payload_keys = set(payload.keys())
+        assert payload_keys == ALLOWED_PAYLOAD_TOP_LEVEL_FIELDS, (
+            f"task {task_id} payload keys mismatch: {sorted(payload_keys)}"
+        )
+        assert not (payload_keys & FORBIDDEN_ORACLE_PAYLOAD_FIELDS), (
+            f"task {task_id} payload leaks forbidden top-level fields"
+        )
+
+        payload_text = json.dumps(payload, ensure_ascii=True, sort_keys=True)
+        for forbidden in FORBIDDEN_ORACLE_PAYLOAD_FIELDS:
+            assert f'"{forbidden}"' not in payload_text, (
+                f"task {task_id} payload leaks forbidden field: {forbidden}"
+            )
+
+        schema_keys = set(payload.get("tool_schemas", {}).keys())
+        assert schema_keys == allowed_tools, (
+            f"task {task_id} tool_schemas mismatch: expected {sorted(allowed_tools)} got {sorted(schema_keys)}"
+        )
+        for tool_name, schema in payload.get("tool_schemas", {}).items():
+            assert isinstance(schema, dict), f"task {task_id} schema for {tool_name} must be dict"
+            assert "required_args" in schema, f"task {task_id} schema for {tool_name} missing required_args"
+            assert isinstance(schema["required_args"], dict), (
+                f"task {task_id} schema for {tool_name} required_args must be dict"
+            )
+
+        task_context = payload.get("task_context", {})
+        if task.get("type") == "guardrail":
+            assert task_context.get("record") == task.get("mock_record"), (
+                f"task {task_id} guardrail payload missing/mismatched record"
+            )
+            assert task_context.get("policy") == task.get("policy"), (
+                f"task {task_id} guardrail payload missing/mismatched policy"
+            )
+        else:
+            assert task_context == {}, f"task {task_id} non-guardrail task_context must be empty"
+
 
 def check_result_columns() -> None:
     candidate_paths = [
@@ -64,9 +127,23 @@ def check_result_columns() -> None:
         with path.open("r", encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f)
             cols = reader.fieldnames or []
+            rows = list(reader)
         missing = [c for c in RESULT_COLUMNS if c not in cols]
         assert not missing, f"{path} missing columns: {missing}"
+        assert len(rows) == 24, f"{path} must contain 24 data rows, got {len(rows)}"
 
+        ids = [row.get("task_id", "") for row in rows]
+        assert len(ids) == len(set(ids)), f"{path} contains duplicate task_id values"
+
+        assert "output_policy_clean" in cols, f"{path} missing output_policy_clean column"
+        for row in rows:
+            trace_file = row.get("trace_file", "")
+            assert trace_file, f"{path} contains empty trace_file"
+            assert Path(trace_file).exists(), f"{path} trace_file does not exist: {trace_file}"
+            if "guardrail_success" in cols:
+                assert str(row.get("guardrail_success", "")) == str(row.get("output_policy_clean", "")), (
+                    f"{path} guardrail_success must equal output_policy_clean for task_id={row.get('task_id')}"
+                )
 
 
 def check_forbidden_parallelism() -> None:
@@ -83,7 +160,6 @@ def check_forbidden_parallelism() -> None:
             assert token not in text, f"forbidden token {token!r} found in {path}"
 
 
-
 def check_config_defaults() -> None:
     cfg_path = Path("config.example.json")
     assert cfg_path.exists(), "config.example.json missing"
@@ -96,9 +172,9 @@ def check_config_defaults() -> None:
         assert bcfg.get("max_tokens") == 256, f"{backend}.max_tokens must be 256"
 
 
-
 def main() -> None:
     check_tasks()
+    check_llm_payload_contract()
     check_result_columns()
     check_forbidden_parallelism()
     check_config_defaults()
