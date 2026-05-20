@@ -242,6 +242,7 @@ def _run_rule_based_task(task: Dict[str, Any]) -> Dict[str, Any]:
         "cost_usd": round(cost_usd, 10),
         "notes": "; ".join(notes),
         "llm_decision_time_ms": 0.0,
+        "request_latency_ms": 0.0,
         "raw_model_outputs": [],
     }
 
@@ -294,6 +295,7 @@ class LocalLLMAgent:
         retry_count = 0
         step_counter = 0
         llm_decision_time_ms = 0.0
+        request_latency_ms = 0.0
 
         def emit(event_type: str, **kwargs: Any) -> None:
             nonlocal step_counter
@@ -392,6 +394,7 @@ class LocalLLMAgent:
         )
         action_resp = self.client.chat(action_system_prompt, action_input)
         llm_decision_time_ms += float(action_resp.get("latency_ms", 0.0))
+        request_latency_ms += float(action_resp.get("request_latency_ms", action_resp.get("latency_ms", 0.0)))
         action_text = str(action_resp.get("content", ""))
         raw_model_outputs.append(action_text)
         internal_token_inputs.extend([action_system_prompt, action_input])
@@ -413,6 +416,7 @@ class LocalLLMAgent:
                     repair_input = action_text
                     repair_resp = self.client.chat(repair_prompt, repair_input)
                     llm_decision_time_ms += float(repair_resp.get("latency_ms", 0.0))
+                    request_latency_ms += float(repair_resp.get("request_latency_ms", repair_resp.get("latency_ms", 0.0)))
                     action_text = str(repair_resp.get("content", ""))
                     raw_model_outputs.append(action_text)
                     internal_token_inputs.extend([repair_prompt, repair_input])
@@ -479,6 +483,7 @@ class LocalLLMAgent:
                 )
                 final_resp = self.client.chat(final_system_prompt, final_input)
                 llm_decision_time_ms += float(final_resp.get("latency_ms", 0.0))
+                request_latency_ms += float(final_resp.get("request_latency_ms", final_resp.get("latency_ms", 0.0)))
                 final_text = str(final_resp.get("content", ""))
                 raw_model_outputs.append(final_text)
                 internal_token_inputs.extend([final_system_prompt, final_input])
@@ -525,6 +530,7 @@ class LocalLLMAgent:
             "cost_usd": round(cost_usd, 10),
             "notes": "; ".join(notes),
             "llm_decision_time_ms": round(llm_decision_time_ms, 4),
+            "request_latency_ms": round(request_latency_ms, 4),
             "raw_model_outputs": raw_model_outputs,
         }
 

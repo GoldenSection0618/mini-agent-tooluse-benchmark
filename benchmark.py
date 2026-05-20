@@ -20,11 +20,13 @@ from tracing import make_trace_path, new_event, write_trace_event
 
 RESULT_COLUMNS = [
     "agent_backend",
+    "provider",
     "model_name",
     "temperature",
     "max_tokens",
     "run_id",
     "llm_decision_time_ms",
+    "request_latency_ms",
     "task_id",
     "task_type",
     "task_subtype",
@@ -81,20 +83,19 @@ def _load_json_config(path: str | None) -> Dict[str, Any]:
 
 def _get_runtime_settings(args: argparse.Namespace) -> Dict[str, Any]:
     file_cfg = _load_json_config(args.config)
-    lm_cfg = file_cfg.get("lmstudio", {})
+    default_agent_cfg = file_cfg.get("default_agent")
+    backend = args.agent or default_agent_cfg or "rule_based"
+    backend_cfg = file_cfg.get(backend, {})
     pricing_cfg = file_cfg.get("mock_pricing", {})
-    backend_from_cfg = file_cfg.get("agent_backend")
-
-    backend = args.agent or backend_from_cfg or "rule_based"
-    base_url = args.base_url if args.base_url is not None else lm_cfg.get("base_url", "http://localhost:1234")
+    base_url = args.base_url if args.base_url is not None else backend_cfg.get("base_url", "http://localhost:1234")
     chat_endpoint = (
-        args.chat_endpoint if args.chat_endpoint is not None else lm_cfg.get("chat_endpoint", "/api/v1/chat")
+        args.chat_endpoint if args.chat_endpoint is not None else backend_cfg.get("chat_endpoint", "/api/v1/chat")
     )
-    model = args.model if args.model is not None else lm_cfg.get("model", "google/gemma-4-e4b")
-    temperature = args.temperature if args.temperature is not None else lm_cfg.get("temperature", 0)
-    max_tokens = args.max_tokens if args.max_tokens is not None else lm_cfg.get("max_tokens", 512)
+    model = args.model if args.model is not None else backend_cfg.get("model", "google/gemma-4-e4b")
+    temperature = args.temperature if args.temperature is not None else backend_cfg.get("temperature", 0)
+    max_tokens = args.max_tokens if args.max_tokens is not None else backend_cfg.get("max_tokens", 256)
     timeout_seconds = (
-        args.timeout_seconds if args.timeout_seconds is not None else lm_cfg.get("timeout_seconds", 120)
+        args.timeout_seconds if args.timeout_seconds is not None else backend_cfg.get("timeout_seconds", 120)
     )
 
     return {
@@ -120,6 +121,9 @@ def _build_agent(settings: Dict[str, Any]) -> tuple[Any, str]:
             ),
             "rule_based",
         )
+
+    if backend == "deepseek":
+        raise RuntimeError("deepseek backend not wired yet; complete Step 6 first")
 
     client = LMStudioClient(
         base_url=str(settings["base_url"]),
@@ -230,9 +234,10 @@ def run_benchmark(
     settings = settings or {}
     agent_backend = str(settings.get("agent", "rule_based"))
     agent, resolved_model_name = _build_agent(settings)
+    provider = "local" if agent_backend == "rule_based" else ("local_lmstudio" if agent_backend == "lmstudio" else "deepseek")
     model_name = "rule_based" if agent_backend == "rule_based" else resolved_model_name
-    temperature = settings.get("temperature", 0 if agent_backend == "rule_based" else "")
-    max_tokens = "" if agent_backend == "rule_based" else settings.get("max_tokens", 512)
+    temperature = settings.get("temperature", 0)
+    max_tokens = settings.get("max_tokens", 256)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     with tasks_path.open("r", encoding="utf-8") as f:
@@ -279,6 +284,7 @@ def run_benchmark(
                 "cost_usd": 0.0,
                 "notes": f"agent_runtime_error: {exc}",
                 "llm_decision_time_ms": 0.0,
+                "request_latency_ms": 0.0,
                 "raw_model_outputs": [],
             }
         wall_clock_time_ms = (time.perf_counter() - start) * 1000
@@ -337,11 +343,13 @@ def run_benchmark(
         )
         row = {
             "agent_backend": agent_backend,
+            "provider": provider,
             "model_name": model_name,
             "temperature": temperature,
             "max_tokens": max_tokens,
             "run_id": run_id,
             "llm_decision_time_ms": float(agent_result.get("llm_decision_time_ms", 0.0)),
+            "request_latency_ms": float(agent_result.get("request_latency_ms", 0.0)),
             "task_id": task["id"],
             "task_type": task["type"],
             "task_subtype": task.get("subtype", ""),
@@ -397,7 +405,7 @@ def run_benchmark(
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run mini agent tool-use benchmark.")
-    parser.add_argument("--agent", choices=["rule_based", "lmstudio"], default=None)
+    parser.add_argument("--agent", choices=["rule_based", "lmstudio", "deepseek"], default=None)
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--chat-endpoint", default=None)
     parser.add_argument("--model", default=None)
@@ -414,8 +422,18 @@ def main() -> None:
     parser = _build_arg_parser()
     args = parser.parse_args()
     settings = _get_runtime_settings(args)
-    default_output = "results_rule_based.csv" if settings["agent"] == "rule_based" else "results_lmstudio.csv"
-    default_trace_dir = "traces_rule_based" if settings["agent"] == "rule_based" else "traces_lmstudio"
+    default_output_map = {
+        "rule_based": "results_rule_based.csv",
+        "lmstudio": "results_lmstudio.csv",
+        "deepseek": "results_deepseek.csv",
+    }
+    default_trace_dir_map = {
+        "rule_based": "traces_rule_based",
+        "lmstudio": "traces_lmstudio",
+        "deepseek": "traces_deepseek",
+    }
+    default_output = default_output_map.get(settings["agent"], "results.csv")
+    default_trace_dir = default_trace_dir_map.get(settings["agent"], "traces")
     output_path = Path(args.output or default_output)
     trace_dir = args.trace_dir or default_trace_dir
     try:
