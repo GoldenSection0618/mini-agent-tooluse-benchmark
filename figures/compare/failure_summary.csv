@@ -1,7 +1,8 @@
 agent_backend,failure_type,count
-deepseek,hallucinated_result,21
-deepseek,none,2
-deepseek,tool_misuse,1
-lmstudio,hallucinated_result,12
-lmstudio,tool_misuse,12
+deepseek,hallucinated_result,13
+deepseek,none,6
+deepseek,planning_error,1
+deepseek,tool_misuse,4
+lmstudio,hallucinated_result,14
+lmstudio,tool_misuse,10
 rule_based,none,24

@@ -10,9 +10,9 @@ Final-answer matching alone can hide process failures. An answer may look correc
 
 | Backend | Model | Tasks | Success | Tool-use | Multi-step | Guardrail | Avg wall-clock ms | Main failure modes |
 |---|---|---:|---:|---:|---:|---:|---:|---|
-| rule_based | rule_based | 24 | 100.00% | 100.00% | 100.00% | 100.00% | 0.03 | none:24 |
-| lmstudio | google/gemma-4-e4b | 24 | 0.00% | 0.00% | 0.00% | 0.00% | 27706.25 | tool_misuse:12, hallucinated_result:12 |
-| deepseek | deepseek-v4-flash | 24 | 8.33% | 25.00% | 0.00% | 0.00% | 7146.20 | hallucinated_result:21, tool_misuse:1 |
+| rule_based | rule_based | 24 | 100.00% | 100.00% | 100.00% | 100.00% | 0.05 | none:24 |
+| lmstudio | google/gemma-4-e4b | 24 | 0.00% | 0.00% | 0.00% | 0.00% | 30641.57 | hallucinated_result:14, tool_misuse:10 |
+| deepseek | deepseek-v4-flash | 24 | 25.00% | 75.00% | 0.00% | 0.00% | 1617.07 | hallucinated_result:13, none:6, tool_misuse:4 |
 
 Snapshot values are sourced from generated summaries under `figures/compare/summary_by_backend.csv` and `figures/compare/summary_by_backend_and_task_type.csv`.
 
