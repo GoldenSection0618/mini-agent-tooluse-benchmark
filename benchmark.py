@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
+import platform
+import subprocess
+import sys
 import time
 from collections import Counter
 from datetime import datetime, timezone
@@ -191,6 +195,66 @@ def _build_agent(settings: Dict[str, Any]) -> tuple[Any, str]:
     raise RuntimeError(f"unsupported backend: {backend}")
 
 
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _git_output(args: list[str]) -> str:
+    try:
+        proc = subprocess.run(["git", *args], check=True, capture_output=True, text=True)
+        return proc.stdout.strip()
+    except Exception:
+        return "unknown"
+
+
+def _metadata_path_for_output(output_path: Path) -> Path:
+    metadata_dir = output_path.parent / "metadata"
+    return metadata_dir / f"{output_path.stem}.json"
+
+
+def _write_run_metadata(
+    *,
+    metadata_path: Path,
+    run_id: str,
+    created_at_utc: str,
+    agent_backend: str,
+    provider: str,
+    model_name: str,
+    temperature: Any,
+    max_tokens: Any,
+    tasks_path: Path,
+    output_path: Path,
+    trace_dir: str,
+    task_type_counts: Dict[str, int],
+) -> None:
+    metadata = {
+        "run_id": run_id,
+        "created_at_utc": created_at_utc,
+        "agent_backend": agent_backend,
+        "provider": provider,
+        "model_name": model_name,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "tasks_path": str(tasks_path),
+        "tasks_sha256": _sha256_file(tasks_path),
+        "output_path": str(output_path),
+        "trace_dir": trace_dir,
+        "git_commit": _git_output(["rev-parse", "HEAD"]),
+        "git_branch": _git_output(["rev-parse", "--abbrev-ref", "HEAD"]),
+        "python_version": sys.version,
+        "platform": platform.platform(),
+        "sequential_execution": True,
+        "task_count": int(sum(task_type_counts.values())),
+        "task_type_counts": task_type_counts,
+    }
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.write_text(json.dumps(metadata, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+
 def validate_tasks_schema(tasks: List[Dict[str, Any]]) -> None:
     if len(tasks) != 24:
         raise ValueError(f"expected 24 tasks, got {len(tasks)}")
@@ -272,7 +336,7 @@ def run_benchmark(
     output_path: Path = Path("results.csv"),
     trace_dir: str = "traces",
     settings: Dict[str, Any] | None = None,
-) -> List[Dict[str, Any]]:
+) -> tuple[List[Dict[str, Any]], Path]:
     settings = settings or {}
     agent_backend = str(settings.get("agent", "rule_based"))
     agent, resolved_model_name = _build_agent(settings)
@@ -281,10 +345,12 @@ def run_benchmark(
     temperature = settings.get("temperature", 0)
     max_tokens = settings.get("max_tokens", 256)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    created_at_utc = datetime.now(timezone.utc).isoformat()
 
     with tasks_path.open("r", encoding="utf-8") as f:
         tasks: List[Dict[str, Any]] = json.load(f)
     validate_tasks_schema(tasks)
+    task_type_counts = dict(Counter(task.get("type", "") for task in tasks))
 
     rows: List[Dict[str, Any]] = []
 
@@ -454,12 +520,29 @@ def run_benchmark(
         )
         rows.append(row)
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=RESULT_COLUMNS)
         writer.writeheader()
         writer.writerows(rows)
 
-    return rows
+    metadata_path = _metadata_path_for_output(output_path)
+    _write_run_metadata(
+        metadata_path=metadata_path,
+        run_id=run_id,
+        created_at_utc=created_at_utc,
+        agent_backend=agent_backend,
+        provider=provider,
+        model_name=model_name,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        tasks_path=tasks_path,
+        output_path=output_path,
+        trace_dir=trace_dir,
+        task_type_counts=task_type_counts,
+    )
+
+    return rows, metadata_path
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -496,11 +579,12 @@ def main() -> None:
     output_path = Path(args.output or default_output)
     trace_dir = args.trace_dir or default_trace_dir
     try:
-        rows = run_benchmark(output_path=output_path, trace_dir=trace_dir, settings=settings)
+        rows, metadata_path = run_benchmark(output_path=output_path, trace_dir=trace_dir, settings=settings)
     except RuntimeError as exc:
         print(str(exc))
         raise SystemExit(1) from exc
     print(f"Wrote {output_path} with {len(rows)} rows")
+    print(f"Wrote metadata {metadata_path}")
 
 
 if __name__ == "__main__":
