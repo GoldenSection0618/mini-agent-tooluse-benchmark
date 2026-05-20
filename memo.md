@@ -105,23 +105,43 @@ From `results_rule_based.csv`:
 - guardrail false positives: `0`
 - guardrail false negatives: `0`
 - average wall-clock latency by task type (ms):
-  - `tool_use`: `0.060975`
-  - `multi_step`: `0.059275`
-  - `guardrail`: `0.041675`
+  - `tool_use`: `0.046825`
+  - `multi_step`: `0.0480375`
+  - `guardrail`: `0.034`
 - average tool latency by task type (ms):
-  - `tool_use`: `0.020125`
-  - `multi_step`: `0.0193`
-  - `guardrail`: `0.0164375`
+  - `tool_use`: `0.0162`
+  - `multi_step`: `0.0154`
+  - `guardrail`: `0.013`
 
-### 6.2 LM Studio status
+### 6.2 LM Studio snapshot (latest generated)
 
-LM Studio backend support is implemented (client, preflight, agent integration, trace metadata, and benchmark output fields). Result generation depends on local server responsiveness and model runtime state.
+From `results_lmstudio.csv`:
 
-### 6.3 DeepSeek status
+- total tasks: `24`
+- overall success: `0%`
+- failure type distribution:
+  - `hallucinated_result`: `19`
+  - `tool_misuse`: `5`
+- average wall-clock latency by task type (ms):
+  - `tool_use`: `14020.7443875`
+  - `multi_step`: `8025.963875`
+  - `guardrail`: `8028.3472`
 
-DeepSeek backend support is implemented (OpenAI-compatible client, API-key env loading, preflight, shared tool-calling agent integration, benchmark output fields).
+This snapshot shows backend availability and instrumentation are working, while action JSON reliability is currently the main bottleneck for this model/runtime setup.
 
-At this memo snapshot, cloud run results are not included unless `results_deepseek.csv` has been generated in the local environment.
+### 6.3 DeepSeek snapshot (latest generated)
+
+From `results_deepseek.csv`:
+
+- total tasks: `24`
+- overall success: `20.83%` (`5/24`)
+- failure type distribution:
+  - `hallucinated_result`: `19`
+  - `none`: `5`
+- average wall-clock latency by task type (ms):
+  - `tool_use`: `4378.8642`
+  - `multi_step`: `5615.483925`
+  - `guardrail`: `5131.514625`
 
 ## 7. Failure Taxonomy Across Backends
 

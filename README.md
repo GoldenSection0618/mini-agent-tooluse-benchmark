@@ -157,12 +157,13 @@ Typical outputs by backend:
 - `results_lmstudio.csv` / `traces_lmstudio/`
 - `results_deepseek.csv` / `traces_deepseek/`
 
-Core figures:
+Single-backend figures (written to the selected `--figures-dir`, e.g. `figures_rule_based/`):
 
 - `latency_by_task_type.png`
 - `success_rate_by_task_type.png`
 - `failure_type_distribution.png`
 - `failure_flags_distribution.png`
+- `oracle_metric_breakdown.png`
 
 Comparison mode may also generate:
 
@@ -188,7 +189,12 @@ DeepSeek results include network latency, provider queueing, rate limits, and pr
 
 ## Token and Cost Note
 
-Token and cost values are approximate estimates based on a simple heuristic and fixed mock pricing. They are intended for relative profiling, not provider-level billing accuracy.
+Token/cost fields combine two sources:
+
+- provider usage when available (`prompt_tokens_provider`, `completion_tokens_provider`, `total_tokens_provider`)
+- heuristic token counting fallback when provider usage is unavailable
+
+`cost_usd` uses configured per-token mock pricing, and `pricing_source` records which path was used (`provider_usage_with_configured_pricing`, `provider_usage_no_pricing`, or `heuristic_mock`). These values are for relative profiling, not provider-level billing accuracy.
 
 ## Limitations
 
