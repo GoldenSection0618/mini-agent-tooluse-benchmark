@@ -1,12 +1,28 @@
 {
-  "agent_backend": "rule_based",
+  "default_agent": "rule_based",
+  "rule_based": {
+    "model": "rule_based",
+    "temperature": 0,
+    "max_tokens": 256
+  },
   "lmstudio": {
     "base_url": "http://localhost:1234",
     "chat_endpoint": "/api/v1/chat",
     "model": "google/gemma-4-e4b",
     "temperature": 0,
-    "max_tokens": 512,
+    "max_tokens": 256,
     "timeout_seconds": 120
+  },
+  "deepseek": {
+    "base_url": "https://api.deepseek.com",
+    "chat_endpoint": "/chat/completions",
+    "model": "deepseek-v4-flash",
+    "temperature": 0,
+    "max_tokens": 256,
+    "timeout_seconds": 120,
+    "thinking": {
+      "type": "disabled"
+    }
   },
   "mock_pricing": {
     "input_cost_per_token_usd": 0.000001,

@@ -11,3 +11,5 @@ Thumbs.db
 *.log
 *.tmp
 config.local.json
+.env
+*secret*
