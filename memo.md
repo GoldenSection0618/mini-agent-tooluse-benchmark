@@ -85,9 +85,9 @@ Snapshot from current canonical outputs:
 
 | Backend | Tasks | Success | Tool-use | Multi-step | Guardrail | Avg wall-clock ms | Avg request latency ms | Main failure types |
 |---|---:|---:|---:|---:|---:|---:|---:|---|
-| rule_based | 24 | 100.00% | 100.00% | 100.00% | 100.00% | 0.0526 | 0.0000 | none:24 |
+| rule_based | 24 | 100.00% | 100.00% | 100.00% | 100.00% | 0.0526 | 0.0000 | no failures |
 | lmstudio | 24 | 0.00% | 0.00% | 0.00% | 0.00% | 30641.5679 | 30641.2632 | hallucinated_result:14, tool_misuse:10 |
-| deepseek | 24 | 25.00% | 75.00% | 0.00% | 0.00% | 1617.0674 | 1130.0354 | hallucinated_result:13, none:6, tool_misuse:4 |
+| deepseek | 24 | 25.00% | 75.00% | 0.00% | 0.00% | 1617.0674 | 1130.0354 | hallucinated_result:13, tool_misuse:4, planning_error:1 |
 
 Interpretation:
 

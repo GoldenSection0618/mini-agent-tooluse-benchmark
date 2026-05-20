@@ -95,6 +95,8 @@ def main() -> None:
             [
                 py,
                 "benchmark.py",
+                "--config",
+                "config.example.json",
                 "--agent",
                 "deepseek",
                 "--base-url",

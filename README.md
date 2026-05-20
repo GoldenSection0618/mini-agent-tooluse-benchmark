@@ -10,11 +10,11 @@ Final-answer matching alone can hide process failures. An answer may look correc
 
 | Backend | Model | Tasks | Success | Tool-use | Multi-step | Guardrail | Avg wall-clock ms | Main failure modes |
 |---|---|---:|---:|---:|---:|---:|---:|---|
-| rule_based | rule_based | 24 | 100.00% | 100.00% | 100.00% | 100.00% | 0.05 | none:24 |
+| rule_based | rule_based | 24 | 100.00% | 100.00% | 100.00% | 100.00% | 0.05 | no failures |
 | lmstudio | google/gemma-4-e4b | 24 | 0.00% | 0.00% | 0.00% | 0.00% | 30641.57 | hallucinated_result:14, tool_misuse:10 |
-| deepseek | deepseek-v4-flash | 24 | 25.00% | 75.00% | 0.00% | 0.00% | 1617.07 | hallucinated_result:13, none:6, tool_misuse:4 |
+| deepseek | deepseek-v4-flash | 24 | 25.00% | 75.00% | 0.00% | 0.00% | 1617.07 | hallucinated_result:13, tool_misuse:4, planning_error:1 |
 
-Snapshot values are sourced from generated summaries under `figures/compare/summary_by_backend.csv` and `figures/compare/summary_by_backend_and_task_type.csv`.
+Snapshot rates and latency values are sourced from `figures/compare/summary_by_backend.csv` and `figures/compare/summary_by_backend_and_task_type.csv`. Failure counts are sourced from `figures/compare/failure_type_by_backend.csv`.
 
 ## Backends
 
