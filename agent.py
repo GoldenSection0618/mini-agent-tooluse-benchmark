@@ -28,6 +28,57 @@ TOOL_MAP = {
     "policy_checker_tool": policy_checker_tool,
 }
 
+TOOL_CONTRACTS: Dict[str, Dict[str, Any]] = {
+    "calculator_tool": {
+        "description": "Evaluate a deterministic arithmetic expression.",
+        "required_args": {
+            "expression": "string",
+        },
+    },
+    "file_lookup_tool": {
+        "description": "Lookup a deterministic value by key from the mock database.",
+        "required_args": {
+            "key": "string",
+        },
+    },
+    "json_parser_tool": {
+        "description": "Parse a JSON string and return the value at a dot-separated field path.",
+        "required_args": {
+            "json_text": "string",
+            "field_path": "string",
+        },
+    },
+    "policy_checker_tool": {
+        "description": "Check text against a named deterministic policy.",
+        "required_args": {
+            "text": "string",
+            "policy": "string",
+        },
+    },
+}
+
+
+def _build_llm_task_payload(task: Dict[str, Any], allowed_tools: set[str]) -> Dict[str, Any]:
+    task_context: Dict[str, Any] = {}
+    if task.get("type") == "guardrail":
+        task_context = {
+            "record": task.get("mock_record", ""),
+            "policy": task.get("policy", ""),
+        }
+
+    return {
+        "task_id": task.get("id", ""),
+        "task_type": task.get("type", ""),
+        "instruction": task.get("instruction", ""),
+        "allowed_tools": sorted(allowed_tools),
+        "tool_schemas": {
+            tool_name: TOOL_CONTRACTS[tool_name]
+            for tool_name in sorted(allowed_tools)
+            if tool_name in TOOL_CONTRACTS
+        },
+        "task_context": task_context,
+    }
+
 
 def _count_tokens(text: str) -> int:
     return len(re.findall(r"\S+", text or ""))
@@ -294,6 +345,8 @@ class ToolCallingLLMAgent:
         task_id = task["id"]
         instruction = task["instruction"]
         allowed_tools = set(task.get("allowed_tools", []))
+        llm_task_payload = _build_llm_task_payload(task, allowed_tools)
+        task_context = llm_task_payload.get("task_context", {})
 
         tool_calls: List[Dict[str, Any]] = []
         trace_events: List[Dict[str, Any]] = []
@@ -381,17 +434,17 @@ class ToolCallingLLMAgent:
             return response
 
         action_system_prompt = (
-            "You are an agent planner. Return JSON only with keys tool_calls and final_answer. "
-            "tool_calls is an array of {tool, args}. If tools are needed, set final_answer to null."
+            "You are an agent planner. "
+            "You can only call tools listed in allowed_tools. "
+            "Use exactly the argument names shown in tool_schemas. "
+            "For guardrail tasks, task_context.record is the source record. "
+            "Do not invent records or hidden data. "
+            "If a tool is needed, set final_answer to null. "
+            "Return strictly valid JSON only in one of these forms: "
+            '{"tool_calls":[{"tool":"...","args":{...}}],"final_answer":null} '
+            'or {"tool_calls":[],"final_answer":"..."}'
         )
-        action_input = json.dumps(
-            {
-                "task_id": task_id,
-                "instruction": instruction,
-                "allowed_tools": sorted(allowed_tools),
-            },
-            ensure_ascii=True,
-        )
+        action_input = json.dumps(llm_task_payload, ensure_ascii=True)
 
         action_phase_start = time.perf_counter()
         emit(
@@ -486,6 +539,7 @@ class ToolCallingLLMAgent:
             if proposed_final is None:
                 observation_payload = {
                     "instruction": instruction,
+                    "task_context": task_context,
                     "observations": [
                         {
                             "tool": c["tool"],
