@@ -8,10 +8,11 @@ Final-answer matching alone can hide process failures. An answer may look correc
 
 ## Backends
 
-Two backends are supported:
+Three backends are supported:
 
-- `rule_based`: deterministic sanity baseline
-- `lmstudio`: local real LLM backend through LM Studio REST API v1
+- `rule_based`: deterministic sanity backend for validating evaluator/tracing/failure taxonomy
+- `lmstudio`: local LLM backend through LM Studio REST API v1 (reduced external variance, still local runtime variance)
+- `deepseek`: cloud LLM backend through DeepSeek OpenAI-compatible Chat Completions API (includes network/provider-side effects)
 
 ## LM Studio Setup
 
@@ -104,7 +105,7 @@ python benchmark.py --agent rule_based
 python analysis.py --input results_rule_based.csv --figures-dir figures_rule_based
 ```
 
-Local LM Studio run:
+LM Studio run:
 
 ```bash
 python benchmark.py \
@@ -118,11 +119,27 @@ python benchmark.py \
 python analysis.py --input results_lmstudio.csv --figures-dir figures_lmstudio
 ```
 
+DeepSeek run:
+
+```bash
+export DEEPSEEK_API_KEY="your_api_key_here"
+
+python benchmark.py \
+  --agent deepseek \
+  --base-url https://api.deepseek.com \
+  --chat-endpoint /chat/completions \
+  --model deepseek-v4-flash \
+  --output results_deepseek.csv \
+  --trace-dir traces_deepseek
+
+python analysis.py --input results_deepseek.csv --figures-dir figures_deepseek
+```
+
 Comparison:
 
 ```bash
 python analysis.py \
-  --input results_rule_based.csv results_lmstudio.csv \
+  --input results_rule_based.csv results_lmstudio.csv results_deepseek.csv \
   --figures-dir figures_compare
 ```
 
@@ -138,6 +155,7 @@ Typical outputs by backend:
 
 - `results_rule_based.csv` / `traces_rule_based/`
 - `results_lmstudio.csv` / `traces_lmstudio/`
+- `results_deepseek.csv` / `traces_deepseek/`
 
 Core figures:
 
@@ -150,10 +168,23 @@ Comparison mode may also generate:
 
 - `success_rate_by_backend.png`
 - `latency_by_backend.png`
+- `success_rate_by_backend_and_task_type.png`
+- `failure_type_by_backend.png`
+- `failure_flags_by_backend.png`
+- `tool_sequence_match_by_backend.png`
+- `tool_argument_match_by_backend.png`
+
+## Security Note
+
+- Never commit API keys.
+- DeepSeek key is read from `DEEPSEEK_API_KEY`.
+- `config.local.json` is ignored.
 
 ## Reproducibility Note
 
 Using a local LM Studio backend reduces network-induced latency variance, API-provider queueing, rate-limit effects, and silent provider-side model updates. It does not eliminate runtime variance from local hardware load, model loading, quantization, context length, decoding settings, thermal throttling, or LM Studio server overhead.
+
+DeepSeek results include network latency, provider queueing, rate limits, and provider-side model/runtime effects. Latency values across local and cloud backends should be interpreted as system-level latency, not pure model compute time.
 
 ## Token and Cost Note
 
