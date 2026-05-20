@@ -10,7 +10,7 @@ Final-answer matching alone can hide process failures. An answer may look correc
 
 | Backend | Model | Tasks | Success | Tool-use | Multi-step | Guardrail | Avg wall-clock ms | Main failure modes |
 |---|---|---:|---:|---:|---:|---:|---:|---|
-| rule_based | rule_based | 24 | 100.00% | 100.00% | 100.00% | 100.00% | 0.05 | no failures |
+| rule_based | rule_based | 24 | 100.00% | 100.00% | 100.00% | 100.00% | 0.04 | no failures |
 | lmstudio | google/gemma-4-e4b | 24 | 8.33% | 25.00% | 0.00% | 0.00% | 25105.48 | tool_misuse:13, hallucinated_result:7, wrong_calculation:2 |
 | deepseek | deepseek-v4-flash | 24 | 33.33% | 100.00% | 0.00% | 0.00% | 1922.79 | tool_misuse:10, answer_mismatch:5, planning_error:1 |
 
