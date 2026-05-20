@@ -1,10 +1,7 @@
 agent_backend,failure_flag,count
-deepseek,answer_mismatch,14
-deepseek,contains_required_text_missing,10
+deepseek,answer_mismatch,9
+deepseek,contains_required_text_missing,8
 deepseek,excluded_text_leaked,1
-deepseek,format_mismatch,10
-deepseek,hallucinated_without_tool,3
-deepseek,required_tool_missing,17
-deepseek,tool_argument_mismatch,18
-deepseek,tool_sequence_mismatch,18
-deepseek,wrong_numeric_answer,4
+deepseek,required_tool_missing,7
+deepseek,tool_argument_mismatch,11
+deepseek,tool_sequence_mismatch,8

@@ -1,4 +1,4 @@
-agent_backend,n_tasks,success_rate_pct,final_answer_correct_rate_pct,avg_wall_clock_time_ms,avg_request_latency_ms,avg_tool_latency_ms
-deepseek,24,25.0,41.66666666666667,1617.0674499999998,1130.0354083333334,0.009837499999999999
-lmstudio,24,0.0,0.0,30641.567858333336,30641.2632125,0.0
-rule_based,24,100.0,100.0,0.05262916666666667,0.0,0.0155125
+agent_backend,backend_role,n_tasks,success_rate_pct,final_answer_correct_rate_pct,avg_wall_clock_time_ms,avg_request_latency_ms,avg_tool_latency_ms
+deepseek,llm_backend,24,33.33333333333333,62.5,1922.7922916666666,1922.3022833333334,0.032
+lmstudio,llm_backend,24,8.333333333333332,8.333333333333332,25105.481620833332,25105.120883333333,0.002075
+rule_based,oracle_sanity_check,24,100.0,100.0,0.03746666666666667,0.0,0.0118875
