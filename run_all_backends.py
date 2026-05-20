@@ -53,13 +53,13 @@ def main() -> None:
     py = sys.executable
     completed_results: List[str] = []
     figure_dir_map = {
-        "results_rule_based.csv": "figures_rule_based",
-        "results_lmstudio.csv": "figures_lmstudio",
-        "results_deepseek.csv": "figures_deepseek",
+        "results/rule_based.csv": "figures/rule_based",
+        "results/lmstudio.csv": "figures/lmstudio",
+        "results/deepseek.csv": "figures/deepseek",
     }
 
-    if run_cmd([py, "benchmark.py", "--agent", "rule_based"]):
-        completed_results.append("results_rule_based.csv")
+    if run_cmd([py, "benchmark.py", "--agent", "rule_based", "--output", "results/rule_based.csv", "--trace-dir", "traces/rule_based"]):
+        completed_results.append("results/rule_based.csv")
     else:
         print("rule_based run failed; continue to optional checks")
 
@@ -78,12 +78,12 @@ def main() -> None:
                 "--model",
                 "google/gemma-4-e4b",
                 "--output",
-                "results_lmstudio.csv",
+                "results/lmstudio.csv",
                 "--trace-dir",
-                "traces_lmstudio",
+                "traces/lmstudio",
             ]
         ):
-            completed_results.append("results_lmstudio.csv")
+            completed_results.append("results/lmstudio.csv")
         else:
             print("lmstudio run failed")
     else:
@@ -104,12 +104,12 @@ def main() -> None:
                 "--model",
                 "deepseek-v4-flash",
                 "--output",
-                "results_deepseek.csv",
+                "results/deepseek.csv",
                 "--trace-dir",
-                "traces_deepseek",
+                "traces/deepseek",
             ]
         ):
-            completed_results.append("results_deepseek.csv")
+            completed_results.append("results/deepseek.csv")
         else:
             print("deepseek run failed")
     else:
@@ -121,7 +121,7 @@ def main() -> None:
         run_cmd([py, "analysis.py", "--input", result_path, "--figures-dir", single_figures_dir])
 
     if len(existing_results) >= 2:
-        run_cmd([py, "analysis.py", "--input", *existing_results, "--figures-dir", "figures_compare"])
+        run_cmd([py, "analysis.py", "--input", *existing_results, "--figures-dir", "figures/compare"])
 
 
 if __name__ == "__main__":

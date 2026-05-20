@@ -367,10 +367,12 @@ def main() -> None:
     args = parser.parse_args()
     input_paths = args.input
     if not input_paths:
-        if Path("results.csv").exists():
+        if Path("results/rule_based.csv").exists():
+            input_paths = ["results/rule_based.csv"]
+        elif Path("results.csv").exists():
             input_paths = ["results.csv"]
         else:
-            input_paths = ["results_rule_based.csv"]
+            input_paths = ["results/rule_based.csv"]
 
     fig_dir = Path(args.figures_dir)
     fig_dir.mkdir(parents=True, exist_ok=True)

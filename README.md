@@ -104,7 +104,7 @@ Rule-based baseline:
 
 ```bash
 python benchmark.py --agent rule_based
-python analysis.py --input results_rule_based.csv --figures-dir figures_rule_based
+python analysis.py --input results/rule_based.csv --figures-dir figures/rule_based
 ```
 
 LM Studio run:
@@ -115,10 +115,10 @@ python benchmark.py \
   --base-url http://localhost:1234 \
   --chat-endpoint /api/v1/chat \
   --model google/gemma-4-e4b \
-  --output results_lmstudio.csv \
-  --trace-dir traces_lmstudio
+  --output results/lmstudio.csv \
+  --trace-dir traces/lmstudio
 
-python analysis.py --input results_lmstudio.csv --figures-dir figures_lmstudio
+python analysis.py --input results/lmstudio.csv --figures-dir figures/lmstudio
 ```
 
 DeepSeek run:
@@ -131,37 +131,37 @@ python benchmark.py \
   --base-url https://api.deepseek.com \
   --chat-endpoint /chat/completions \
   --model deepseek-v4-flash \
-  --output results_deepseek.csv \
-  --trace-dir traces_deepseek
+  --output results/deepseek.csv \
+  --trace-dir traces/deepseek
 
-python analysis.py --input results_deepseek.csv --figures-dir figures_deepseek
+python analysis.py --input results/deepseek.csv --figures-dir figures/deepseek
 ```
 
 Comparison:
 
 ```bash
 python analysis.py \
-  --input results_rule_based.csv results_lmstudio.csv results_deepseek.csv \
-  --figures-dir figures_compare
+  --input results/rule_based.csv results/lmstudio.csv results/deepseek.csv \
+  --figures-dir figures/compare
 ```
 
 Trace inspection helper:
 
 ```bash
-python inspect_trace.py traces_rule_based/ms_01.jsonl
+python inspect_trace.py traces/rule_based/ms_01.jsonl
 ```
 
 ## Output Artifacts
 
 Typical outputs by backend:
 
-- `results_rule_based.csv` / `traces_rule_based/`
-- `results_lmstudio.csv` / `traces_lmstudio/`
-- `results_deepseek.csv` / `traces_deepseek/`
+- `results/rule_based.csv` / `traces/rule_based/`
+- `results/lmstudio.csv` / `traces/lmstudio/`
+- `results/deepseek.csv` / `traces/deepseek/`
 
-`results.csv` is an ad-hoc/default output path when explicitly requested. For reproducible backend comparison, use `results_rule_based.csv`, `results_lmstudio.csv`, and `results_deepseek.csv`.
+`results.csv` is an ad-hoc/default output path when explicitly requested. For reproducible backend comparison, use `results/rule_based.csv`, `results/lmstudio.csv`, and `results/deepseek.csv`.
 
-Single-backend figures (written to the selected `--figures-dir`, e.g. `figures_rule_based/`):
+Single-backend figures (written to the selected `--figures-dir`, e.g. `figures/rule_based/`):
 
 - `latency_by_task_type.png`
 - `success_rate_by_task_type.png`

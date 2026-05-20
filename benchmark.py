@@ -333,8 +333,8 @@ def _run_guardrail_checks(task: Dict[str, Any], answer: str) -> Dict[str, Any]:
 
 def run_benchmark(
     tasks_path: Path = Path("tasks.json"),
-    output_path: Path = Path("results.csv"),
-    trace_dir: str = "traces",
+    output_path: Path = Path("results/rule_based.csv"),
+    trace_dir: str = "traces/rule_based",
     settings: Dict[str, Any] | None = None,
 ) -> tuple[List[Dict[str, Any]], Path]:
     settings = settings or {}
@@ -565,14 +565,14 @@ def main() -> None:
     args = parser.parse_args()
     settings = _get_runtime_settings(args)
     default_output_map = {
-        "rule_based": "results_rule_based.csv",
-        "lmstudio": "results_lmstudio.csv",
-        "deepseek": "results_deepseek.csv",
+        "rule_based": "results/rule_based.csv",
+        "lmstudio": "results/lmstudio.csv",
+        "deepseek": "results/deepseek.csv",
     }
     default_trace_dir_map = {
-        "rule_based": "traces_rule_based",
-        "lmstudio": "traces_lmstudio",
-        "deepseek": "traces_deepseek",
+        "rule_based": "traces/rule_based",
+        "lmstudio": "traces/lmstudio",
+        "deepseek": "traces/deepseek",
     }
     default_output = default_output_map.get(settings["agent"], "results.csv")
     default_trace_dir = default_trace_dir_map.get(settings["agent"], "traces")
