@@ -79,6 +79,8 @@ Trace events include:
 
 This is a lightweight execution trace, not a full reasoning trace.
 
+This benchmark provides end-to-end execution-level explainability through structured traces, oracle checks, tool-call records, guardrail checks, and failure flags. It does not expose or depend on hidden model reasoning.
+
 In `guardrail_check` events:
 
 - `source_contains_sensitive_data`: source/input contains sensitive data

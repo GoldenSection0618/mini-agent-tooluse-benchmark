@@ -83,6 +83,8 @@ Trace events record observable execution only:
 - `evaluation`
 - `task_end`
 
+The benchmark provides execution-level end-to-end explainability: each task can be traced from instruction input through agent action selection, tool calls, tool outputs, optional guardrail checks, oracle-level evaluation, and final failure classification. This is trace-level explainability, not hidden model reasoning disclosure.
+
 ## 5. Latency Interpretation
 
 Latency across backends is not a pure model-compute comparison.
