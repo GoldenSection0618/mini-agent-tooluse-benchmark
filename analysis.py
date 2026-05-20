@@ -63,6 +63,7 @@ def _write_summary_artifacts(df: pd.DataFrame, fig_dir: Path) -> None:
                 "planning_success_rate_pct": _rate_pct(chunk["planning_success"]),
                 "format_correct_rate_pct": _rate_pct(chunk["format_correct"]),
                 "contains_excludes_match_rate_pct": _rate_pct(chunk["contains_excludes_match"]),
+                "output_policy_clean_rate_pct": _rate_pct(chunk["output_policy_clean"]),
                 "guardrail_success_rate_pct": _rate_pct(chunk["guardrail_success"]),
                 "avg_wall_clock_time_ms": float(chunk["wall_clock_time_ms"].mean()),
                 "avg_request_latency_ms": float(chunk["request_latency_ms"].mean()),
@@ -94,6 +95,7 @@ def _write_summary_artifacts(df: pd.DataFrame, fig_dir: Path) -> None:
                 "final_answer_correct_rate_pct": _rate_pct(chunk["final_answer_correct"]),
                 "tool_sequence_match_rate_pct": _rate_pct(chunk["tool_sequence_match"]),
                 "tool_argument_match_rate_pct": _rate_pct(chunk["tool_argument_match"]),
+                "output_policy_clean_rate_pct": _rate_pct(chunk["output_policy_clean"]),
                 "avg_wall_clock_time_ms": float(chunk["wall_clock_time_ms"].mean()),
                 "avg_request_latency_ms": float(chunk["request_latency_ms"].mean()),
                 "avg_tool_latency_ms": float(chunk["tool_latency_ms"].mean()),
@@ -233,7 +235,7 @@ def _plot_oracle_metric_breakdown(df: pd.DataFrame, fig_dir: Path) -> None:
         "planning_success",
         "format_correct",
         "contains_excludes_match",
-        "guardrail_success",
+        "output_policy_clean",
     ]
     rates = [(df[col].mean() * 100) for col in metrics]
 
@@ -382,6 +384,8 @@ def main() -> None:
         frame = pd.read_csv(p)
         if "agent_backend" not in frame.columns:
             frame["agent_backend"] = Path(p).stem
+        if "output_policy_clean" not in frame.columns:
+            frame["output_policy_clean"] = frame.get("guardrail_success", 1)
         frame["source_file"] = p
         parsed = frame["failure_flags"].apply(_safe_parse_flags)
         frame["failure_flags_list"] = parsed.apply(lambda x: x[0])
@@ -395,6 +399,7 @@ def main() -> None:
     final_answer_by_type = (df.groupby("task_type")["final_answer_correct"].mean() * 100).to_dict()
     tool_sequence_by_type = (df.groupby("task_type")["tool_sequence_match"].mean() * 100).to_dict()
     tool_argument_by_type = (df.groupby("task_type")["tool_argument_match"].mean() * 100).to_dict()
+    output_policy_clean_by_type = (df.groupby("task_type")["output_policy_clean"].mean() * 100).to_dict()
     guardrail_false_positive_count = int(df[df["task_type"] == "guardrail"]["false_positive"].sum())
     guardrail_false_negative_count = int(df[df["task_type"] == "guardrail"]["false_negative"].sum())
     avg_wall_clock = df.groupby("task_type")["wall_clock_time_ms"].mean().to_dict()
@@ -429,6 +434,7 @@ def main() -> None:
     print(f"Final-answer correctness by task type: {final_answer_by_type}")
     print(f"Tool-sequence match rate by task type: {tool_sequence_by_type}")
     print(f"Tool-argument match rate by task type: {tool_argument_by_type}")
+    print(f"Output-policy-clean rate by task type: {output_policy_clean_by_type}")
     print(f"Guardrail false positive count: {guardrail_false_positive_count}")
     print(f"Guardrail false negative count: {guardrail_false_negative_count}")
     print(f"Average wall-clock latency by task type (ms): {avg_wall_clock}")

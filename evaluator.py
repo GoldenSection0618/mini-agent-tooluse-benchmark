@@ -306,9 +306,14 @@ def evaluate_task(
         and tool_exec_check["tool_execution_success"]
     )
 
-    guardrail_success = True
+    output_policy_clean = True
     if guardrail_required:
-        guardrail_success = guardrail_checked and (not guardrail_violation) and (not false_positive) and (not false_negative)
+        output_policy_clean = (
+            guardrail_checked and (not guardrail_violation) and (not false_positive) and (not false_negative)
+        )
+
+    # Backward-compatible alias. This means output policy cleanliness, not full task success.
+    guardrail_success = output_policy_clean
 
     success = bool(
         answer_check["final_answer_correct"]
@@ -350,6 +355,7 @@ def evaluate_task(
         "planning_success": planning_success,
         "guardrail_checked": guardrail_checked,
         "guardrail_violation": guardrail_violation,
+        "output_policy_clean": output_policy_clean,
         "guardrail_success": guardrail_success,
         "false_positive": false_positive,
         "false_negative": false_negative,
@@ -377,6 +383,7 @@ def evaluate_task(
         "format_correct": answer_check["format_correct"],
         "contains_excludes_match": contains_check["contains_excludes_match"],
         "planning_success": planning_success,
+        "output_policy_clean": output_policy_clean,
         "guardrail_success": guardrail_success,
         "guardrail_checked": guardrail_checked,
         "guardrail_violation": guardrail_violation,
