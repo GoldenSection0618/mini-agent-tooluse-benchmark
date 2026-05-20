@@ -40,6 +40,7 @@ Outputs:
 - run metadata under `results/metadata/`
 - per-task traces under `traces/<backend>/`
 - backend and comparison figures/summaries under `figures/`
+- canonical examples include `traces/rule_based/` and `figures/compare/`
 
 ## 3. Metric Design
 
