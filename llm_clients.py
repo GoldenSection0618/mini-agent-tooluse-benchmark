@@ -9,6 +9,11 @@ import urllib.request
 from typing import Any, Dict
 
 
+class ChatClient:
+    def chat(self, system_prompt: str, user_input: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+
 def extract_lmstudio_content(response_json: Dict[str, Any]) -> str:
     if isinstance(response_json.get("content"), str):
         return str(response_json["content"])
@@ -25,8 +30,13 @@ def extract_lmstudio_content(response_json: Dict[str, Any]) -> str:
             if isinstance(msg, dict) and isinstance(msg.get("content"), str):
                 return str(msg["content"])
 
-    if isinstance(response_json.get("output"), str):
-        return str(response_json["output"])
+    output = response_json.get("output")
+    if isinstance(output, str):
+        return str(output)
+    if isinstance(output, list) and output:
+        first = output[0]
+        if isinstance(first, dict) and isinstance(first.get("content"), str):
+            return str(first["content"])
 
     if isinstance(response_json.get("text"), str):
         return str(response_json["text"])
@@ -34,7 +44,7 @@ def extract_lmstudio_content(response_json: Dict[str, Any]) -> str:
     return json.dumps(response_json, ensure_ascii=True)
 
 
-class LMStudioClient:
+class LMStudioClient(ChatClient):
     def __init__(
         self,
         base_url: str,
@@ -90,8 +100,10 @@ class LMStudioClient:
                 "ok": True,
                 "content": extract_lmstudio_content(response_json),
                 "latency_ms": latency_ms,
+                "request_latency_ms": latency_ms,
                 "raw_response": response_json,
                 "error": None,
+                "usage": {},
             }
         except urllib.error.HTTPError as exc:
             # Retry with minimal payload in case endpoint rejects temperature/max_tokens.
@@ -103,8 +115,10 @@ class LMStudioClient:
                         "ok": True,
                         "content": extract_lmstudio_content(response_json),
                         "latency_ms": latency_ms,
+                        "request_latency_ms": latency_ms,
                         "raw_response": response_json,
                         "error": None,
+                        "usage": {},
                     }
             except Exception:
                 pass
@@ -118,8 +132,10 @@ class LMStudioClient:
                 "ok": False,
                 "content": "",
                 "latency_ms": latency_ms,
+                "request_latency_ms": latency_ms,
                 "raw_response": None,
                 "error": f"HTTPError {exc.code}: {error_body}",
+                "usage": {},
             }
         except Exception as exc:
             latency_ms = (time.perf_counter() - start) * 1000
@@ -127,9 +143,11 @@ class LMStudioClient:
                 "ok": False,
                 "content": "",
                 "latency_ms": latency_ms,
+                "request_latency_ms": latency_ms,
                 "raw_response": None,
                 "error": str(exc),
+                "usage": {},
             }
 
 
-__all__ = ["LMStudioClient", "extract_lmstudio_content"]
+__all__ = ["ChatClient", "LMStudioClient", "extract_lmstudio_content"]
