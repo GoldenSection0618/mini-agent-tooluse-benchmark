@@ -116,10 +116,9 @@ def main() -> None:
         print(f"skip deepseek: {ds_reason}")
 
     existing_results = [f for f in completed_results if Path(f).exists()]
-    if existing_results:
-        single_backend = existing_results[0]
-        single_figures_dir = figure_dir_map.get(single_backend, f"figures_{Path(single_backend).stem}")
-        run_cmd([py, "analysis.py", "--input", single_backend, "--figures-dir", single_figures_dir])
+    for result_path in existing_results:
+        single_figures_dir = figure_dir_map.get(result_path, f"figures_{Path(result_path).stem}")
+        run_cmd([py, "analysis.py", "--input", result_path, "--figures-dir", single_figures_dir])
 
     if len(existing_results) >= 2:
         run_cmd([py, "analysis.py", "--input", *existing_results, "--figures-dir", "figures_compare"])
