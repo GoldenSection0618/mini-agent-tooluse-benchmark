@@ -302,8 +302,11 @@ def run_benchmark(
             task_type=task["type"],
             task_subtype=task.get("subtype", ""),
             instruction=task["instruction"],
-            backend=agent_backend,
+            agent_backend=agent_backend,
+            provider=provider,
             model_name=model_name,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
 
         start = time.perf_counter()
@@ -332,7 +335,12 @@ def run_benchmark(
             payload.pop("step", None)
             payload.pop("timestamp", None)
             payload.pop("event_type", None)
-            append_trace(event.get("event_type", "agent_decision"), **payload)
+            event_type = event.get("event_type", "agent_decision")
+            if event_type == "agent_decision":
+                payload.setdefault("backend", agent_backend)
+                payload.setdefault("provider", provider)
+                payload.setdefault("model_name", model_name)
+            append_trace(event_type, **payload)
 
         guardrail_result = _run_guardrail_checks(task, str(agent_result.get("final_answer", "")))
         if task.get("guardrail_required", False):
@@ -425,6 +433,7 @@ def run_benchmark(
         append_trace(
             "task_end",
             agent_backend=agent_backend,
+            provider=provider,
             model_name=model_name,
             success=bool(eval_result["success"]),
             failure_type=failure_type,
