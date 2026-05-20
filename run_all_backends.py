@@ -24,7 +24,7 @@ def check_lmstudio() -> Tuple[bool, str]:
         model="google/gemma-4-e4b",
         temperature=0,
         max_tokens=256,
-        timeout_seconds=20,
+        timeout_seconds=120,
     )
     result = client.chat("You are a concise assistant.", "Reply with OK only.")
     if not result.get("ok", False):
@@ -41,7 +41,7 @@ def check_deepseek() -> Tuple[bool, str]:
         model="deepseek-v4-flash",
         temperature=0,
         max_tokens=256,
-        timeout_seconds=30,
+        timeout_seconds=120,
         thinking={"type": "disabled"},
     )
     if not deepseek_preflight(client):
