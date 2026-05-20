@@ -11,8 +11,8 @@ Final-answer matching alone can hide process failures. An answer may look correc
 | Backend | Model | Tasks | Success | Tool-use | Multi-step | Guardrail | Avg wall-clock ms | Main failure modes |
 |---|---|---:|---:|---:|---:|---:|---:|---|
 | rule_based | rule_based | 24 | 100.00% | 100.00% | 100.00% | 100.00% | 0.05 | no failures |
-| lmstudio | google/gemma-4-e4b | 24 | 0.00% | 0.00% | 0.00% | 0.00% | 30641.57 | hallucinated_result:14, tool_misuse:10 |
-| deepseek | deepseek-v4-flash | 24 | 25.00% | 75.00% | 0.00% | 0.00% | 1617.07 | hallucinated_result:13, tool_misuse:4, planning_error:1 |
+| lmstudio | google/gemma-4-e4b | 24 | 8.33% | 25.00% | 0.00% | 0.00% | 25105.48 | tool_misuse:13, hallucinated_result:7, wrong_calculation:2 |
+| deepseek | deepseek-v4-flash | 24 | 33.33% | 100.00% | 0.00% | 0.00% | 1922.79 | tool_misuse:10, answer_mismatch:5, planning_error:1 |
 
 Snapshot rates and latency values are sourced from `figures/compare/summary_by_backend.csv` and `figures/compare/summary_by_backend_and_task_type.csv`. Failure counts are sourced from `figures/compare/failure_type_by_backend.csv`.
 
@@ -20,7 +20,7 @@ Snapshot rates and latency values are sourced from `figures/compare/summary_by_b
 
 Three backends are supported:
 
-- `rule_based`: deterministic sanity backend for validating evaluator/tracing/failure taxonomy
+- `rule_based`: oracle sanity backend for validating evaluator/tracing/failure taxonomy (not a competitive baseline)
 - `lmstudio`: local LLM backend through LM Studio REST API v1 (reduced external variance, still local runtime variance)
 - `deepseek`: cloud LLM backend through DeepSeek OpenAI-compatible Chat Completions API (includes network/provider-side effects)
 
@@ -46,12 +46,14 @@ curl http://localhost:1234/api/v1/chat \
 
 - Exactly `24` tasks in `tasks.json`
 - Deterministic local mock tools (`tools.py`)
-- Deterministic rule-based baseline (`RuleBasedAgent`)
+- Deterministic oracle sanity backend (`RuleBasedAgent`)
 - Local/cloud LLM backends through `ToolCallingLLMAgent` + `llm_clients.py`
 - Deterministic guardrail checker (`guardrails.py`)
 - Oracle evaluator with explicit sub-checks (`evaluator.py`)
 - Per-task JSONL traces (`tracing.py` + `traces*/`)
 - Analysis and figures (`analysis.py`)
+
+The current results measure LLM backends under an explicit tool-schema and task-context contract.
 
 ## Task Types
 
@@ -76,6 +78,13 @@ Success is decomposed into:
 - `format_correct`
 - `contains_excludes_match`
 - `guardrail_success` (for guardrail-required tasks)
+
+Guardrail task success and output policy cleanliness are separated:
+
+- `guardrail_success`: full task-level pass/fail under the oracle checks
+- `output_policy_clean`: whether the final output avoids policy-forbidden leakage
+
+A model can produce a policy-clean output while still failing the requested guardrail task.
 
 ## Tracing
 
@@ -104,6 +113,8 @@ In `guardrail_check` events:
 
 - `failure_type`: one primary failure category for aggregation
 - `failure_flags`: all detected failure conditions for compound analysis
+
+Interpretation distinguishes tool schema violations, missing required tools, wrong arguments, wrong final answers, policy leakage, and safe-but-incomplete or context-misunderstood responses, instead of collapsing all failures into a single hallucination bucket.
 
 ## Setup
 
@@ -240,6 +251,8 @@ Token/cost fields combine two sources:
 ## Limitations
 
 - Small-scale controlled benchmark, not a full-scale capability benchmark
-- Rule-based baseline does not represent open-ended model behavior
+- Rule-based backend is an oracle sanity backend, not a competitive baseline
 - Trace logs observable execution events only; hidden model reasoning is not exposed
 - Guardrail detection is deterministic and regex-based
+
+Earlier runs without explicit tool schemas or guardrail record context were wrapper-contract diagnostics, not direct model capability measurements.

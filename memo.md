@@ -25,7 +25,7 @@ Benchmark shape is fixed:
 
 Backends:
 
-- `rule_based` (deterministic sanity baseline)
+- `rule_based` (oracle sanity backend; not a competitive baseline)
 - `lmstudio` (local model through LM Studio REST)
 - `deepseek` (cloud model through OpenAI-compatible chat endpoint)
 
@@ -41,6 +41,12 @@ Outputs:
 - per-task traces under `traces/<backend>/`
 - backend and comparison figures/summaries under `figures/`
 - canonical examples include `traces/rule_based/` and `figures/compare/`
+
+The current results measure LLM backends under an explicit tool-schema and task-context contract:
+
+- action input includes allowed tool schemas with required argument names;
+- guardrail tasks expose observable `record` and `policy` context;
+- evaluator-only oracle fields are not exposed to the model.
 
 ## 3. Metric Design
 
@@ -72,8 +78,10 @@ Outputs:
 - `false_positive`
 - `false_negative`
 - `leaked_pii_types`
+- `output_policy_clean`
 
 The design separates final-answer correctness from process correctness, which is essential for diagnosing tool-use behavior.
+It also separates guardrail task success from output policy cleanliness: a response can be policy-clean but still fail the requested guardrail task.
 
 ## 4. Results
 
@@ -85,15 +93,16 @@ Snapshot from current canonical outputs:
 
 | Backend | Tasks | Success | Tool-use | Multi-step | Guardrail | Avg wall-clock ms | Avg request latency ms | Main failure types |
 |---|---:|---:|---:|---:|---:|---:|---:|---|
-| rule_based | 24 | 100.00% | 100.00% | 100.00% | 100.00% | 0.0526 | 0.0000 | no failures |
-| lmstudio | 24 | 0.00% | 0.00% | 0.00% | 0.00% | 30641.5679 | 30641.2632 | hallucinated_result:14, tool_misuse:10 |
-| deepseek | 24 | 25.00% | 75.00% | 0.00% | 0.00% | 1617.0674 | 1130.0354 | hallucinated_result:13, tool_misuse:4, planning_error:1 |
+| rule_based | 24 | 100.00% | 100.00% | 100.00% | 100.00% | 0.0375 | 0.0000 | no failures |
+| lmstudio | 24 | 8.33% | 25.00% | 0.00% | 0.00% | 25105.4816 | 25105.1209 | tool_misuse:13, hallucinated_result:7, wrong_calculation:2 |
+| deepseek | 24 | 33.33% | 100.00% | 0.00% | 0.00% | 1922.7923 | 1922.3023 | tool_misuse:10, answer_mismatch:5, planning_error:1 |
 
 Interpretation:
 
 - `rule_based` validates harness/evaluator/tracing integrity.
-- `lmstudio` and `deepseek` runs expose process failures dominated by missing/wrong tool usage and hallucinated completion without required tool flow.
+- `lmstudio` and `deepseek` runs expose heterogeneous failures, including tool schema violations, missing required tools, wrong arguments, wrong final answers, and safe-but-incomplete responses.
 - Latency values are system-level end-to-end latency, not pure model compute time.
+- Earlier runs without explicit tool schemas or guardrail record context should be treated as wrapper-contract diagnostics, not direct model capability measurements.
 
 ## 5. Failure Case Taxonomy
 
@@ -116,6 +125,7 @@ Compound `failure_flags` preserve secondary causes in the same task, e.g.:
 - `llm_invalid_json`
 
 This dual view (primary class + compound flags) provides more diagnostic value than a single accuracy score.
+Interpretation should separate failure causes: tool schema violations, missing required tools, wrong arguments, wrong final answer, policy leakage, safe but incomplete response, and refusal caused by missing or misunderstood context.
 
 ## 6. Limitations and Next Steps
 
