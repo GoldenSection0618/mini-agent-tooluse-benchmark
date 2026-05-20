@@ -7,7 +7,7 @@ import re
 import time
 from typing import Any, Dict, List
 
-from llm_clients import LMStudioClient
+from llm_clients import ChatClient, LMStudioClient
 from parsing import extract_json_object
 from tracing import new_event
 from tools import calculator_tool, file_lookup_tool, json_parser_tool, policy_checker_tool
@@ -266,14 +266,20 @@ class RuleBasedAgent:
         return result
 
 
-class LocalLLMAgent:
+class ToolCallingLLMAgent:
     def __init__(
         self,
-        client: LMStudioClient,
+        chat_client: ChatClient,
+        backend_name: str,
+        provider: str,
+        model_name: str,
         input_cost_per_token_usd: float = INPUT_TOKEN_PRICE,
         output_cost_per_token_usd: float = OUTPUT_TOKEN_PRICE,
     ) -> None:
-        self.client = client
+        self.chat_client = chat_client
+        self.backend_name = backend_name
+        self.provider = provider
+        self.model_name = model_name
         self.input_cost_per_token_usd = input_cost_per_token_usd
         self.output_cost_per_token_usd = output_cost_per_token_usd
 
@@ -288,7 +294,7 @@ class LocalLLMAgent:
         tool_calls: List[Dict[str, Any]] = []
         trace_events: List[Dict[str, Any]] = []
         internal_token_inputs: List[str] = []
-        raw_model_outputs: List[str] = []
+        raw_model_output_previews: List[str] = []
         notes: List[str] = []
 
         invalid_tool_call_count = 0
@@ -383,20 +389,22 @@ class LocalLLMAgent:
         action_phase_start = time.perf_counter()
         emit(
             "agent_decision",
-            backend="lmstudio",
-            model_name=self.client.model,
+            backend=self.backend_name,
+            provider=self.provider,
+            model_name=self.model_name,
             phase="action_selection",
             elapsed_ms=0.0,
             llm_latency_ms=0.0,
+            request_latency_ms=0.0,
             parse_ok=False,
             retry_index=retry_count,
             notes="request",
         )
-        action_resp = self.client.chat(action_system_prompt, action_input)
+        action_resp = self.chat_client.chat(action_system_prompt, action_input)
         llm_decision_time_ms += float(action_resp.get("latency_ms", 0.0))
         request_latency_ms += float(action_resp.get("request_latency_ms", action_resp.get("latency_ms", 0.0)))
         action_text = str(action_resp.get("content", ""))
-        raw_model_outputs.append(action_text)
+        raw_model_output_previews.append(action_text[:500])
         internal_token_inputs.extend([action_system_prompt, action_input])
 
         action_data: Dict[str, Any] = {}
@@ -414,23 +422,26 @@ class LocalLLMAgent:
                         "Do not include markdown."
                     )
                     repair_input = action_text
-                    repair_resp = self.client.chat(repair_prompt, repair_input)
+                    repair_resp = self.chat_client.chat(repair_prompt, repair_input)
                     llm_decision_time_ms += float(repair_resp.get("latency_ms", 0.0))
                     request_latency_ms += float(repair_resp.get("request_latency_ms", repair_resp.get("latency_ms", 0.0)))
                     action_text = str(repair_resp.get("content", ""))
-                    raw_model_outputs.append(action_text)
+                    raw_model_output_previews.append(action_text[:500])
                     internal_token_inputs.extend([repair_prompt, repair_input])
 
         emit(
             "agent_decision",
-            backend="lmstudio",
-            model_name=self.client.model,
+            backend=self.backend_name,
+            provider=self.provider,
+            model_name=self.model_name,
             phase="action_selection",
             elapsed_ms=round((time.perf_counter() - action_phase_start) * 1000, 4),
             llm_latency_ms=float(action_resp.get("latency_ms", 0.0)),
+            request_latency_ms=float(action_resp.get("request_latency_ms", action_resp.get("latency_ms", 0.0))),
             parse_ok=parse_ok,
             retry_index=retry_count,
             model_output_preview=action_text[:500],
+            error=action_resp.get("error"),
             notes="response",
         )
 
@@ -448,6 +459,8 @@ class LocalLLMAgent:
                 args = call.get("args", {})
                 if not isinstance(args, dict):
                     args = {}
+                if tool_name not in allowed_tools:
+                    notes.append("llm_disallowed_tool")
                 response = call_tool(tool_name, **args)
                 if not response.get("ok", False):
                     notes.append("tool_execution_failed")
@@ -472,20 +485,22 @@ class LocalLLMAgent:
                 final_phase_start = time.perf_counter()
                 emit(
                     "agent_decision",
-                    backend="lmstudio",
-                    model_name=self.client.model,
+                    backend=self.backend_name,
+                    provider=self.provider,
+                    model_name=self.model_name,
                     phase="final_answer",
                     elapsed_ms=0.0,
                     llm_latency_ms=0.0,
+                    request_latency_ms=0.0,
                     parse_ok=False,
                     retry_index=retry_count,
                     notes="request",
                 )
-                final_resp = self.client.chat(final_system_prompt, final_input)
+                final_resp = self.chat_client.chat(final_system_prompt, final_input)
                 llm_decision_time_ms += float(final_resp.get("latency_ms", 0.0))
                 request_latency_ms += float(final_resp.get("request_latency_ms", final_resp.get("latency_ms", 0.0)))
                 final_text = str(final_resp.get("content", ""))
-                raw_model_outputs.append(final_text)
+                raw_model_output_previews.append(final_text[:500])
                 internal_token_inputs.extend([final_system_prompt, final_input])
                 try:
                     final_data = self._parse_action_json(final_text)
@@ -496,14 +511,17 @@ class LocalLLMAgent:
                     final_answer = ""
                 emit(
                     "agent_decision",
-                    backend="lmstudio",
-                    model_name=self.client.model,
+                    backend=self.backend_name,
+                    provider=self.provider,
+                    model_name=self.model_name,
                     phase="final_answer",
                     elapsed_ms=round((time.perf_counter() - final_phase_start) * 1000, 4),
                     llm_latency_ms=float(final_resp.get("latency_ms", 0.0)),
+                    request_latency_ms=float(final_resp.get("request_latency_ms", final_resp.get("latency_ms", 0.0))),
                     parse_ok=bool(final_answer),
                     retry_index=retry_count,
                     model_output_preview=final_text[:500],
+                    error=final_resp.get("error"),
                     notes="response",
                 )
             else:
@@ -512,10 +530,17 @@ class LocalLLMAgent:
         if not final_answer:
             notes.append("llm_empty_answer")
 
-        emit("agent_decision", backend="lmstudio", model_name=self.client.model, notes="final_answer_generated", final_answer=final_answer)
+        emit(
+            "agent_decision",
+            backend=self.backend_name,
+            provider=self.provider,
+            model_name=self.model_name,
+            notes="final_answer_generated",
+            final_answer=final_answer,
+        )
 
         input_tokens = _count_tokens(" ".join(internal_token_inputs))
-        output_tokens = _count_tokens(" ".join(raw_model_outputs) + " " + final_answer)
+        output_tokens = _count_tokens(" ".join(raw_model_output_previews) + " " + final_answer)
         cost_usd = input_tokens * self.input_cost_per_token_usd + output_tokens * self.output_cost_per_token_usd
 
         return {
@@ -531,12 +556,29 @@ class LocalLLMAgent:
             "notes": "; ".join(notes),
             "llm_decision_time_ms": round(llm_decision_time_ms, 4),
             "request_latency_ms": round(request_latency_ms, 4),
-            "raw_model_outputs": raw_model_outputs,
+            "raw_model_outputs": raw_model_output_previews,
         }
+
+
+class LocalLLMAgent(ToolCallingLLMAgent):
+    def __init__(
+        self,
+        client: LMStudioClient,
+        input_cost_per_token_usd: float = INPUT_TOKEN_PRICE,
+        output_cost_per_token_usd: float = OUTPUT_TOKEN_PRICE,
+    ) -> None:
+        super().__init__(
+            chat_client=client,
+            backend_name="lmstudio",
+            provider="local_lmstudio",
+            model_name=client.model,
+            input_cost_per_token_usd=input_cost_per_token_usd,
+            output_cost_per_token_usd=output_cost_per_token_usd,
+        )
 
 
 def run_task(task: Dict[str, Any]) -> Dict[str, Any]:
     return RuleBasedAgent().run_task(task)
 
 
-__all__ = ["run_task", "RuleBasedAgent", "LocalLLMAgent"]
+__all__ = ["run_task", "RuleBasedAgent", "ToolCallingLLMAgent", "LocalLLMAgent"]
