@@ -81,8 +81,9 @@ Success is decomposed into:
 
 Guardrail task success and output policy cleanliness are separated:
 
-- `guardrail_success`: full task-level pass/fail under the oracle checks
+- `success`: full task-level pass/fail under the oracle checks
 - `output_policy_clean`: whether the final output avoids policy-forbidden leakage
+- `guardrail_success`: backward-compatible alias for `output_policy_clean`; it is not full task success
 
 A model can produce a policy-clean output while still failing the requested guardrail task.
 
