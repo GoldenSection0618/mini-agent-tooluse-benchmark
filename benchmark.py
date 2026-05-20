@@ -5,16 +5,17 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
-from agent import LocalLLMAgent, RuleBasedAgent
+from agent import RuleBasedAgent, ToolCallingLLMAgent
 from evaluator import evaluate_task
 from guardrails import check_guardrail
-from llm_clients import LMStudioClient
+from llm_clients import DeepSeekClient, LMStudioClient, deepseek_preflight
 from tracing import make_trace_path, new_event, write_trace_event
 
 
@@ -106,6 +107,7 @@ def _get_runtime_settings(args: argparse.Namespace) -> Dict[str, Any]:
         "temperature": temperature,
         "max_tokens": max_tokens,
         "timeout_seconds": timeout_seconds,
+        "thinking": backend_cfg.get("thinking"),
         "input_cost_per_token_usd": float(pricing_cfg.get("input_cost_per_token_usd", 0.000001)),
         "output_cost_per_token_usd": float(pricing_cfg.get("output_cost_per_token_usd", 0.000003)),
     }
@@ -122,31 +124,67 @@ def _build_agent(settings: Dict[str, Any]) -> tuple[Any, str]:
             "rule_based",
         )
 
-    if backend == "deepseek":
-        raise RuntimeError("deepseek backend not wired yet; complete Step 6 first")
-
-    client = LMStudioClient(
-        base_url=str(settings["base_url"]),
-        chat_endpoint=str(settings["chat_endpoint"]),
-        model=str(settings["model"]),
-        temperature=float(settings["temperature"]),
-        max_tokens=int(settings["max_tokens"]),
-        timeout_seconds=int(settings["timeout_seconds"]),
-    )
-    preflight = client.chat("Reply with OK only.", "ping")
-    if not preflight.get("ok", False):
-        raise RuntimeError(
-            f"LM Studio backend is not reachable at {client.chat_url}. "
-            "Start LM Studio server or use --agent rule_based."
+    if backend == "lmstudio":
+        client = LMStudioClient(
+            base_url=str(settings["base_url"]),
+            chat_endpoint=str(settings["chat_endpoint"]),
+            model=str(settings["model"]),
+            temperature=float(settings["temperature"]),
+            max_tokens=int(settings["max_tokens"]),
+            timeout_seconds=int(settings["timeout_seconds"]),
         )
-    return (
-        LocalLLMAgent(
-            client=client,
-            input_cost_per_token_usd=float(settings["input_cost_per_token_usd"]),
-            output_cost_per_token_usd=float(settings["output_cost_per_token_usd"]),
-        ),
-        str(settings["model"]),
-    )
+        preflight = client.chat("Reply with OK only.", "ping")
+        if not preflight.get("ok", False):
+            raise RuntimeError(
+                f"LM Studio backend is not reachable at {client.chat_url}. "
+                "Start LM Studio server or use --agent rule_based."
+            )
+        return (
+            ToolCallingLLMAgent(
+                chat_client=client,
+                backend_name="lmstudio",
+                provider="local_lmstudio",
+                model_name=str(settings["model"]),
+                input_cost_per_token_usd=float(settings["input_cost_per_token_usd"]),
+                output_cost_per_token_usd=float(settings["output_cost_per_token_usd"]),
+            ),
+            str(settings["model"]),
+        )
+
+    if backend == "deepseek":
+        if not os.environ.get("DEEPSEEK_API_KEY", "").strip():
+            raise RuntimeError(
+                "DeepSeek backend requires DEEPSEEK_API_KEY in environment. "
+                "Set it or use --agent rule_based."
+            )
+        client = DeepSeekClient(
+            base_url=str(settings["base_url"]),
+            chat_endpoint=str(settings["chat_endpoint"]),
+            model=str(settings["model"]),
+            temperature=float(settings["temperature"]),
+            max_tokens=int(settings["max_tokens"]),
+            timeout_seconds=int(settings["timeout_seconds"]),
+            thinking=settings.get("thinking"),
+        )
+        preflight_ok = deepseek_preflight(client)
+        if not preflight_ok:
+            raise RuntimeError(
+                "DeepSeek backend preflight failed. Ensure DEEPSEEK_API_KEY is set and "
+                f"endpoint is reachable: {client.chat_url}."
+            )
+        return (
+            ToolCallingLLMAgent(
+                chat_client=client,
+                backend_name="deepseek",
+                provider="deepseek",
+                model_name=str(settings["model"]),
+                input_cost_per_token_usd=float(settings["input_cost_per_token_usd"]),
+                output_cost_per_token_usd=float(settings["output_cost_per_token_usd"]),
+            ),
+            str(settings["model"]),
+        )
+
+    raise RuntimeError(f"unsupported backend: {backend}")
 
 
 def validate_tasks_schema(tasks: List[Dict[str, Any]]) -> None:
