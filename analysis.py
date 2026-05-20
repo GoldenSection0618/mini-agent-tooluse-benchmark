@@ -131,6 +131,84 @@ def _plot_latency_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
     plt.close()
 
 
+def _plot_success_rate_by_backend_and_task_type(df: pd.DataFrame, fig_dir: Path) -> None:
+    pivot = (
+        df.pivot_table(index="agent_backend", columns="task_type", values="success", aggfunc="mean", fill_value=0.0)
+        * 100
+    )
+    ax = pivot.plot(kind="bar", figsize=(9, 5))
+    ax.set_ylim(0, 100)
+    ax.set_ylabel("Success Rate (%)")
+    ax.set_title("Success Rate by Backend and Task Type")
+    ax.legend(title="task_type")
+    plt.tight_layout()
+    plt.savefig(fig_dir / "success_rate_by_backend_and_task_type.png", dpi=150)
+    plt.close()
+
+
+def _plot_failure_type_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
+    pivot = (
+        df.pivot_table(index="agent_backend", columns="failure_type", values="task_id", aggfunc="count", fill_value=0)
+    )
+    ax = pivot.plot(kind="bar", figsize=(10, 5))
+    ax.set_ylabel("Count")
+    ax.set_title("Failure Type by Backend")
+    ax.legend(title="failure_type", bbox_to_anchor=(1.02, 1), loc="upper left")
+    plt.tight_layout()
+    plt.savefig(fig_dir / "failure_type_by_backend.png", dpi=150)
+    plt.close()
+
+
+def _plot_failure_flags_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
+    rows = []
+    for _, r in df.iterrows():
+        flags = json.loads(r["failure_flags"])
+        for flag in flags:
+            rows.append({"agent_backend": r["agent_backend"], "failure_flag": flag})
+    if not rows:
+        return
+    flags_df = pd.DataFrame(rows)
+    pivot = (
+        flags_df.pivot_table(index="agent_backend", columns="failure_flag", values="agent_backend", aggfunc="count", fill_value=0)
+    )
+    ax = pivot.plot(kind="bar", figsize=(11, 5))
+    ax.set_ylabel("Count")
+    ax.set_title("Failure Flags by Backend")
+    ax.legend(title="failure_flag", bbox_to_anchor=(1.02, 1), loc="upper left")
+    plt.tight_layout()
+    plt.savefig(fig_dir / "failure_flags_by_backend.png", dpi=150)
+    plt.close()
+
+
+def _plot_tool_match_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
+    summary = (
+        df.groupby("agent_backend", as_index=False)[["tool_sequence_match", "tool_argument_match"]].mean() * 100
+    )
+    summary["agent_backend"] = df.groupby("agent_backend", as_index=False)["agent_backend"].first()["agent_backend"]
+    x = range(len(summary))
+    width = 0.35
+    plt.figure(figsize=(9, 5))
+    plt.bar([i - width / 2 for i in x], summary["tool_sequence_match"], width=width, label="tool_sequence_match")
+    plt.bar([i + width / 2 for i in x], summary["tool_argument_match"], width=width, label="tool_argument_match")
+    plt.xticks(list(x), summary["agent_backend"])
+    plt.ylim(0, 100)
+    plt.ylabel("Rate (%)")
+    plt.title("Tool Match Rates by Backend")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(fig_dir / "tool_sequence_match_by_backend.png", dpi=150)
+    plt.close()
+
+    plt.figure(figsize=(7, 5))
+    plt.bar(summary["agent_backend"], summary["tool_argument_match"])
+    plt.ylim(0, 100)
+    plt.ylabel("Rate (%)")
+    plt.title("Tool Argument Match by Backend")
+    plt.tight_layout()
+    plt.savefig(fig_dir / "tool_argument_match_by_backend.png", dpi=150)
+    plt.close()
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Analyze benchmark result files.")
     parser.add_argument("--input", nargs="*", default=None, help="Input results CSV path(s).")
@@ -189,6 +267,10 @@ def main() -> None:
     if len(input_paths) > 1:
         _plot_success_rate_by_backend(df, fig_dir)
         _plot_latency_by_backend(df, fig_dir)
+        _plot_success_rate_by_backend_and_task_type(df, fig_dir)
+        _plot_failure_type_by_backend(df, fig_dir)
+        _plot_failure_flags_by_backend(df, fig_dir)
+        _plot_tool_match_by_backend(df, fig_dir)
 
     print(f"Overall success rate: {overall_success_rate:.2f}%")
     print(f"Success rate by task type: {success_by_type}")
@@ -204,6 +286,21 @@ def main() -> None:
     print(f"Average agent step count by task type: {avg_agent_steps}")
     print(f"Tool error count summary: {tool_error_summary}")
     if len(input_paths) > 1:
+        overall_by_backend = (df.groupby("agent_backend")["success"].mean() * 100).to_dict()
+        avg_wall_clock_by_backend = df.groupby("agent_backend")["wall_clock_time_ms"].mean().to_dict()
+        avg_request_latency_by_backend = df.groupby("agent_backend")["request_latency_ms"].mean().to_dict()
+        avg_tool_latency_by_backend = df.groupby("agent_backend")["tool_latency_ms"].mean().to_dict()
+        failure_type_by_backend = (
+            df.groupby(["agent_backend", "failure_type"])["task_id"].count().to_dict()
+        )
+        guardrail_df = df[df["task_type"] == "guardrail"]
+        fp_fn_by_backend = (
+            guardrail_df.groupby("agent_backend")[["false_positive", "false_negative"]].sum().to_dict("index")
+            if not guardrail_df.empty
+            else {}
+        )
+
+        print(f"Overall success by backend (%): {overall_by_backend}")
         grouped = (
             df.groupby(["agent_backend", "task_type"], as_index=False)["success"]
             .mean()
@@ -211,6 +308,11 @@ def main() -> None:
         )
         print("Success by backend and task type:")
         print(grouped.to_string(index=False))
+        print(f"Average wall_clock_time_ms by backend: {avg_wall_clock_by_backend}")
+        print(f"Average request_latency_ms by backend: {avg_request_latency_by_backend}")
+        print(f"Average tool_latency_ms by backend: {avg_tool_latency_by_backend}")
+        print(f"Failure type counts by backend: {failure_type_by_backend}")
+        print(f"Guardrail FP/FN by backend: {fp_fn_by_backend}")
 
 
 if __name__ == "__main__":
