@@ -5,9 +5,155 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any, Iterable
 
 import matplotlib.pyplot as plt
 import pandas as pd
+
+
+def _safe_parse_flags(raw: Any) -> tuple[list[str], bool]:
+    if isinstance(raw, list):
+        return [str(x) for x in raw], False
+    if not isinstance(raw, str):
+        return [], True
+    text = raw.strip()
+    if not text:
+        return [], False
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return [], True
+    if not isinstance(parsed, list):
+        return [], True
+    return [str(x) for x in parsed], False
+
+
+def _rate_pct(series: pd.Series) -> float:
+    return float(series.mean() * 100.0)
+
+
+def _top_failure_types(df: pd.DataFrame, top_n: int = 3) -> str:
+    counts = df["failure_type"].value_counts()
+    parts = [f"{k}:{int(v)}" for k, v in counts.head(top_n).items()]
+    return "|".join(parts)
+
+
+def _write_csv(path: Path, frame: pd.DataFrame, sort_by: Iterable[str]) -> None:
+    if not frame.empty:
+        sort_cols = [c for c in sort_by if c in frame.columns]
+        if sort_cols:
+            frame = frame.sort_values(sort_cols, kind="mergesort")
+    frame.to_csv(path, index=False)
+
+
+def _write_summary_artifacts(df: pd.DataFrame, fig_dir: Path) -> None:
+    rows = []
+    for (backend, source_file), chunk in df.groupby(["agent_backend", "source_file"], dropna=False):
+        malformed_flags = int(chunk["failure_flags_malformed"].sum())
+        rows.append(
+            {
+                "agent_backend": backend,
+                "source_file": source_file,
+                "n_tasks": int(len(chunk)),
+                "success_rate_pct": _rate_pct(chunk["success"]),
+                "final_answer_correct_rate_pct": _rate_pct(chunk["final_answer_correct"]),
+                "required_tools_called_rate_pct": _rate_pct(chunk["required_tools_called"]),
+                "tool_sequence_match_rate_pct": _rate_pct(chunk["tool_sequence_match"]),
+                "tool_argument_match_rate_pct": _rate_pct(chunk["tool_argument_match"]),
+                "planning_success_rate_pct": _rate_pct(chunk["planning_success"]),
+                "format_correct_rate_pct": _rate_pct(chunk["format_correct"]),
+                "contains_excludes_match_rate_pct": _rate_pct(chunk["contains_excludes_match"]),
+                "guardrail_success_rate_pct": _rate_pct(chunk["guardrail_success"]),
+                "avg_wall_clock_time_ms": float(chunk["wall_clock_time_ms"].mean()),
+                "avg_request_latency_ms": float(chunk["request_latency_ms"].mean()),
+                "avg_tool_latency_ms": float(chunk["tool_latency_ms"].mean()),
+                "avg_tool_call_count": float(chunk["tool_call_count"].mean()),
+                "invalid_tool_call_count": int(chunk["invalid_tool_call_count"].sum()),
+                "retry_count": int(chunk["retry_count"].sum()),
+                "tool_error_count": int(chunk["tool_error_count"].sum()),
+                "guardrail_false_positive_count": int(chunk["false_positive"].sum()),
+                "guardrail_false_negative_count": int(chunk["false_negative"].sum()),
+                "input_tokens": int(chunk["input_tokens"].sum()),
+                "output_tokens": int(chunk["output_tokens"].sum()),
+                "cost_usd": float(chunk["cost_usd"].sum()),
+                "main_failure_types": _top_failure_types(chunk),
+                "malformed_failure_flags_count": malformed_flags,
+            }
+        )
+    summary_overall = pd.DataFrame(rows)
+    _write_csv(fig_dir / "summary_overall.csv", summary_overall, ["agent_backend", "source_file"])
+
+    by_task_rows = []
+    for (backend, task_type), chunk in df.groupby(["agent_backend", "task_type"], dropna=False):
+        by_task_rows.append(
+            {
+                "agent_backend": backend,
+                "task_type": task_type,
+                "n_tasks": int(len(chunk)),
+                "success_rate_pct": _rate_pct(chunk["success"]),
+                "final_answer_correct_rate_pct": _rate_pct(chunk["final_answer_correct"]),
+                "tool_sequence_match_rate_pct": _rate_pct(chunk["tool_sequence_match"]),
+                "tool_argument_match_rate_pct": _rate_pct(chunk["tool_argument_match"]),
+                "avg_wall_clock_time_ms": float(chunk["wall_clock_time_ms"].mean()),
+                "avg_request_latency_ms": float(chunk["request_latency_ms"].mean()),
+                "avg_tool_latency_ms": float(chunk["tool_latency_ms"].mean()),
+            }
+        )
+    summary_by_task = pd.DataFrame(by_task_rows)
+    _write_csv(fig_dir / "summary_by_task_type.csv", summary_by_task, ["agent_backend", "task_type"])
+
+    failure_summary = (
+        df.groupby(["agent_backend", "failure_type"], as_index=False)["task_id"]
+        .count()
+        .rename(columns={"task_id": "count"})
+    )
+    _write_csv(fig_dir / "failure_summary.csv", failure_summary, ["agent_backend", "failure_type"])
+
+    flags_rows = []
+    for _, row in df.iterrows():
+        flags = row.get("failure_flags_list", [])
+        for flag in flags:
+            flags_rows.append({"agent_backend": row["agent_backend"], "failure_flag": flag})
+    failure_flags_summary = pd.DataFrame(flags_rows)
+    if failure_flags_summary.empty:
+        failure_flags_summary = pd.DataFrame(columns=["agent_backend", "failure_flag", "count"])
+    else:
+        failure_flags_summary = (
+            failure_flags_summary.groupby(["agent_backend", "failure_flag"], as_index=False)
+            .size()
+            .rename(columns={"size": "count"})
+        )
+    _write_csv(fig_dir / "failure_flags_summary.csv", failure_flags_summary, ["agent_backend", "failure_flag"])
+
+    if df["agent_backend"].nunique() > 1:
+        by_backend = (
+            df.groupby("agent_backend", as_index=False)
+            .agg(
+                n_tasks=("task_id", "count"),
+                success_rate_pct=("success", lambda s: _rate_pct(s)),
+                final_answer_correct_rate_pct=("final_answer_correct", lambda s: _rate_pct(s)),
+                avg_wall_clock_time_ms=("wall_clock_time_ms", "mean"),
+                avg_request_latency_ms=("request_latency_ms", "mean"),
+                avg_tool_latency_ms=("tool_latency_ms", "mean"),
+            )
+        )
+        _write_csv(fig_dir / "summary_by_backend.csv", by_backend, ["agent_backend"])
+        _write_csv(fig_dir / "summary_by_backend_and_task_type.csv", summary_by_task, ["agent_backend", "task_type"])
+
+        failure_type_by_backend = (
+            df.groupby(["agent_backend", "failure_type"], as_index=False)["task_id"]
+            .count()
+            .rename(columns={"task_id": "count"})
+        )
+        _write_csv(fig_dir / "failure_type_by_backend.csv", failure_type_by_backend, ["agent_backend", "failure_type"])
+
+        guardrail_df = df[df["task_type"] == "guardrail"]
+        guardrail_fp_fn = (
+            guardrail_df.groupby("agent_backend", as_index=False)[["false_positive", "false_negative"]]
+            .sum()
+            .rename(columns={"false_positive": "guardrail_false_positive_count", "false_negative": "guardrail_false_negative_count"})
+        )
+        _write_csv(fig_dir / "guardrail_fp_fn_by_backend.csv", guardrail_fp_fn, ["agent_backend"])
 
 
 def _plot_latency_by_task_type(df: pd.DataFrame, fig_dir: Path) -> None:
@@ -61,8 +207,8 @@ def _plot_failure_distribution(df: pd.DataFrame, fig_dir: Path) -> None:
 
 def _plot_failure_flags_distribution(df: pd.DataFrame, fig_dir: Path) -> None:
     flags = []
-    for raw in df["failure_flags"]:
-        parsed = json.loads(raw)
+    for raw in df["failure_flags_list"]:
+        parsed = raw if isinstance(raw, list) else []
         flags.extend(parsed)
 
     counts = pd.Series(flags).value_counts().sort_index() if flags else pd.Series(dtype="int64")
@@ -162,7 +308,7 @@ def _plot_failure_type_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
 def _plot_failure_flags_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
     rows = []
     for _, r in df.iterrows():
-        flags = json.loads(r["failure_flags"])
+        flags = r.get("failure_flags_list", [])
         for flag in flags:
             rows.append({"agent_backend": r["agent_backend"], "failure_flag": flag})
     if not rows:
@@ -235,8 +381,12 @@ def main() -> None:
         if "agent_backend" not in frame.columns:
             frame["agent_backend"] = Path(p).stem
         frame["source_file"] = p
+        parsed = frame["failure_flags"].apply(_safe_parse_flags)
+        frame["failure_flags_list"] = parsed.apply(lambda x: x[0])
+        frame["failure_flags_malformed"] = parsed.apply(lambda x: 1 if x[1] else 0)
         frames.append(frame)
     df = pd.concat(frames, ignore_index=True)
+    _write_summary_artifacts(df, fig_dir)
 
     overall_success_rate = df["success"].mean() * 100
     success_by_type = (df.groupby("task_type")["success"].mean() * 100).to_dict()
@@ -255,8 +405,8 @@ def main() -> None:
     }
 
     failure_flags = []
-    for raw in df["failure_flags"]:
-        failure_flags.extend(json.loads(raw))
+    for raw in df["failure_flags_list"]:
+        failure_flags.extend(raw if isinstance(raw, list) else [])
     failure_flags_dist = pd.Series(failure_flags).value_counts().to_dict() if failure_flags else {}
 
     _plot_latency_by_task_type(df, fig_dir)
