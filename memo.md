@@ -104,6 +104,28 @@ Interpretation:
 - Latency values are system-level end-to-end latency, not pure model compute time.
 - Earlier runs without explicit tool schemas or guardrail record context should be treated as wrapper-contract diagnostics, not direct model capability measurements.
 
+### 4.1 Why are LLM success rates low?
+
+The low success rates are not caused by benchmark runtime failures. They reflect process-level tool-use failures captured by the oracle evaluator.
+
+For DeepSeek, the dominant pattern is not single-tool inability. It reaches 100% success on `tool_use` tasks, but 0% on `multi_step` and `guardrail` tasks. The main failure flags are `tool_argument_mismatch=11`, `tool_sequence_mismatch=8`, `required_tool_missing=7`, and `contains_required_text_missing=8`. This suggests the backend can follow simple tool calls but struggles with strict multi-step process compliance and task-specific guardrail output requirements.
+
+For LM Studio / Gemma, failure is more fundamental. Dominant flags include `llm_invalid_json=17`, `llm_empty_answer=22`, `format_mismatch=22`, `required_tool_missing=20`, `tool_sequence_mismatch=20`, and `tool_execution_failed=13`. This indicates instability in the JSON action protocol and tool-call formatting, not only reasoning failure.
+
+Therefore, this benchmark is best interpreted as an execution-level protocol stress test, not a general intelligence benchmark.
+
+### 4.2 Backend-level diagnosis
+
+- `deepseek`: high single-step tool-use pass rate, but weak sequence/argument compliance in multi-step and guardrail workflows.
+- `lmstudio`: frequent structured-output and protocol failures before higher-level task logic can be evaluated.
+- `rule_based`: oracle sanity backend with 100% pass, confirming evaluator/task/trace pipeline executability under deterministic logic.
+
+### 4.3 Representative failure cases
+
+- Correct-looking answers with missing required tools are classified as process failures, not successes.
+- Policy-clean guardrail outputs can still fail when required content constraints are missing.
+- JSON action formatting failures cascade into empty outputs, wrong tool calls, and downstream mismatches.
+
 ## 5. Failure Case Taxonomy
 
 Primary `failure_type` categories:
@@ -144,3 +166,16 @@ Practical next steps:
 - add optional real tool adapters behind the same evaluator contract
 - strengthen policy checker coverage (while keeping deterministic baseline checks)
 - expand backend matrix while preserving sequential reproducibility constraints
+
+### Possible mitigations
+
+Future versions can test whether the observed failures can be reduced by:
+
+- stricter structured-output enforcement, such as JSON schema validation or function-calling APIs;
+- tool-call repair loops that validate tool names and required arguments before execution;
+- step-by-step tool planning templates for multi-step tasks;
+- clearer guardrail answer templates distinguishing policy cleanliness from task completion;
+- repeated runs to estimate variance and confidence intervals;
+- additional backends to separate model capability from wrapper/interface effects.
+
+These mitigations are intentionally left as future extensions, because the current goal is to expose and classify failure modes rather than optimize one backend.

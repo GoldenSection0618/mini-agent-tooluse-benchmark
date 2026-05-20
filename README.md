@@ -6,6 +6,8 @@ This repository implements a small-scale benchmark for evaluating LLM agent tool
 
 Final-answer matching alone can hide process failures. An answer may look correct while the agent skips required tools, calls tools in the wrong order, uses wrong arguments, or leaks sensitive fields. This benchmark keeps setup local and deterministic, then adds oracle checks and lightweight traces to measure both outcome and process quality.
 
+Low LLM success rates are expected in this benchmark: they expose process-level tool-use failures such as invalid JSON actions, missing required tools, wrong tool order, wrong arguments, and safe-but-incomplete guardrail responses.
+
 ## Current Result Snapshot
 
 | Backend | Model | Tasks | Success | Tool-use | Multi-step | Guardrail | Avg wall-clock ms | Main failure modes |
