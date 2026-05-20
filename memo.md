@@ -1,160 +1,157 @@
-# Technical Memo: Local LM Studio Backend Integration
+# Technical Memo: Three-Backend Benchmark Design
 
 ## 1. Problem Definition
 
-This repository is a small-scale controlled benchmark for profiling LLM agent tool-use efficiency, reliability, and guardrail failure cases. The benchmark is intentionally local-first, deterministic where possible, and limited to `24` fixed tasks.
+This project is a small-scale controlled benchmark for profiling LLM agent tool-use efficiency, reliability, and guardrail failure cases. It is intentionally constrained to `24` fixed tasks so benchmark behavior is easy to inspect and reproduce.
 
-Why this matters:
+The core evaluation issue is that final-answer correctness alone is insufficient. An agent can still fail by:
 
-- final-answer accuracy alone is not enough
-- tool-use process errors can be hidden by seemingly correct outputs
-- single-label failures can hide compound issues
+- skipping required tools,
+- using wrong tools or wrong argument values,
+- violating sequence constraints in multi-step tasks,
+- leaking policy-forbidden sensitive data.
 
-The benchmark therefore logs oracle checks, per-task traces, and compound failure flags.
+The benchmark therefore evaluates both outcomes and process signals: oracle checks, structured traces, and compound failure flags.
 
-## 2. Benchmark Setup
+## 2. Backend Design
 
-Task split remains fixed:
+The benchmark uses one unified runner and three interchangeable backends.
+
+### 2.1 rule_based
+
+- deterministic sanity backend
+- no external API dependency
+- validates runner/evaluator/tracing correctness
+- provides stable regression control
+
+### 2.2 lmstudio
+
+- local real LLM backend via LM Studio REST endpoint (`/api/v1/chat`)
+- exercises real model behavior under local inference/runtime
+- preserves compatibility with offline/local workflows
+
+### 2.3 deepseek
+
+- cloud backend via DeepSeek OpenAI-compatible Chat Completions endpoint (`/chat/completions`)
+- uses `DEEPSEEK_API_KEY` from environment variables
+- reflects cloud API deployment conditions (network + provider-side effects)
+
+## 3. Why Three Backends
+
+Using one backend only makes diagnosis ambiguous.
+
+- `rule_based` isolates harness logic and catches evaluator/tracing regressions quickly.
+- `lmstudio` tests realistic model-driven tool use while reducing external API variance.
+- `deepseek` tests a cloud API path closer to production-style deployment constraints.
+
+This backend split improves interpretability of failures without expanding task count.
+
+## 4. Controlled Evaluation Setup
+
+Task set remains fixed:
 
 - `8` tool_use
 - `8` multi_step
 - `8` guardrail
 
-Core components:
+Execution is strictly sequential: one task at a time, one trace file per task, one CSV row per task.
 
-- `benchmark.py`: runner, backend selection, CSV logging
-- `agent.py`: `RuleBasedAgent` and `LocalLLMAgent`
-- `llm_clients.py`: LM Studio REST v1 client (`/api/v1/chat`)
-- `tools.py`: deterministic mock tools
-- `guardrails.py`: deterministic sensitive-data checks
-- `evaluator.py`: oracle checks + primary failure + compound flags
-- `tracing.py`: JSONL trace writer
-- `analysis.py`: aggregation and plotting
+Oracle success is decomposed into explicit checks:
 
-## 3. Local LLM Backend
-
-### 3.1 Why LM Studio was added
-
-A local LLM backend was added to evaluate real model-driven tool planning without requiring external cloud APIs. This preserves offline operation and reduces network/provider variability.
-
-### 3.2 Why rule_based baseline is retained
-
-The rule-based backend remains necessary as a deterministic sanity baseline:
-
-- validates benchmark mechanics
-- provides stable regression control
-- isolates evaluator or schema regressions from model variability
-
-### 3.3 What local backend measures
-
-The local backend can measure:
-
-- model-driven tool selection quality
-- tool argument quality
-- structured-output robustness (JSON action protocol)
-- guardrail outcomes under model-generated answers
-- local end-to-end latency profiles
-
-### 3.4 What local backend does not measure
-
-It does not measure hidden model reasoning quality directly. The benchmark reports observable traces and oracle outcomes only.
-
-## 4. Oracle Evaluation and Failure Taxonomy
-
-Success is decomposed into explicit checks:
-
-- final-answer correctness
-- required tool usage
-- tool sequence correctness
-- tool argument correctness
-- tool execution success
-- planning success
-- format correctness
-- contains/excludes constraints
-- guardrail success
+- `final_answer_correct`
+- `required_tools_called`
+- `tool_sequence_match`
+- `tool_argument_match`
+- `tool_execution_success`
+- `planning_success`
+- `format_correct`
+- `contains_excludes_match`
+- `guardrail_success`
 
 Failure reporting has two layers:
 
-- `failure_type`: one primary category for aggregate plots
-- `failure_flags`: all detected failure conditions for compound error analysis
+- `failure_type`: primary aggregate category
+- `failure_flags`: compound machine-readable error flags
 
-This design avoids under-reporting multi-cause failures.
+Trace events record observable execution only:
 
-## 5. Trace Methodology
+- `task_start`
+- `agent_decision`
+- `tool_call`
+- `tool_result`
+- `guardrail_check`
+- `evaluation`
+- `task_end`
 
-Each task writes a JSONL trace with observable events:
+## 5. Latency Interpretation
 
-- task_start
-- agent_decision
-- tool_call
-- tool_result
-- guardrail_check
-- evaluation
-- task_end
+Latency across backends is not a pure model-compute comparison.
 
-For LM Studio mode, agent decision events include backend/model/phase metadata and compact model output previews.
+- `rule_based` latency is mainly local Python/tool execution overhead.
+- `lmstudio` latency includes local model runtime, loading state, and local hardware contention.
+- `deepseek` latency includes client-side network transport and provider-side queue/runtime effects.
 
-Methodology note:
-
-The benchmark reports observable tool-use traces and oracle-level evaluation results. It does not expose hidden model reasoning. Local LLM traces record prompts, compact action decisions, tool calls, tool results, guardrail checks, and evaluator outputs.
+Therefore, cross-backend latency is a system-level measurement, not an apples-to-apples model-speed metric.
 
 ## 6. Experimental Results
 
-### 6.1 Rule-based results (generated)
+### 6.1 Rule-based snapshot (latest generated)
 
-From `results_rule_based.csv` (latest run):
+From `results_rule_based.csv`:
 
 - total tasks: `24`
 - overall success: `100%`
-- failure type distribution: `none=24`
+- failure types: `none=24`
 - guardrail false positives: `0`
 - guardrail false negatives: `0`
 - average wall-clock latency by task type (ms):
-  - tool_use: `0.0639875`
-  - multi_step: `0.0656`
-  - guardrail: `0.0509`
+  - `tool_use`: `0.060975`
+  - `multi_step`: `0.059275`
+  - `guardrail`: `0.041675`
 - average tool latency by task type (ms):
-  - tool_use: `0.018175`
-  - multi_step: `0.0265125`
-  - guardrail: `0.01805`
+  - `tool_use`: `0.020125`
+  - `multi_step`: `0.0193`
+  - `guardrail`: `0.0164375`
 
-### 6.2 LM Studio results status
+### 6.2 LM Studio status
 
-LM Studio backend support is implemented in code, including endpoint configuration, preflight check, structured two-phase prompting, and trace integration. LM Studio result generation depends on local server availability.
+LM Studio backend support is implemented (client, preflight, agent integration, trace metadata, and benchmark output fields). Result generation depends on local server responsiveness and model runtime state.
 
-If `results_lmstudio.csv` is not present for a run session, report status as implemented but not generated.
+### 6.3 DeepSeek status
 
-## 7. Variance and Reproducibility
+DeepSeek backend support is implemented (OpenAI-compatible client, API-key env loading, preflight, shared tool-calling agent integration, benchmark output fields).
 
-Using local LM Studio reduces:
+At this memo snapshot, cloud run results are not included unless `results_deepseek.csv` has been generated in the local environment.
 
-- network-induced latency variance
-- provider queue/rate-limit effects
-- provider-side silent model updates
+## 7. Failure Taxonomy Across Backends
 
-Remaining variance sources include:
+The taxonomy is designed to preserve both top-level and compound signals.
 
-- local hardware load
-- model load state and caching
-- quantization/runtime backend differences
-- context length and decoding behavior
-- thermal throttling
-- LM Studio server overhead
+Primary categories (`failure_type`) include:
 
-Token and cost values are approximate heuristic estimates for relative profiling, not billing-accurate metering.
+- `planning_error`
+- `tool_misuse`
+- `wrong_calculation`
+- `answer_mismatch`
+- `hallucinated_result`
+- `policy_miss`
+- `format_error`
 
-## 8. Limitations and Extensions
+Compound flags (`failure_flags`) can preserve secondary causes in a single task, e.g. required tool missing + answer mismatch + disallowed tool request.
 
-Current limitations:
+This is important for backend comparisons because different backends may fail for different combinations even when final-answer accuracy looks similar.
 
-- small benchmark size (`24` tasks)
-- deterministic mock tools
-- regex-style guardrails
-- no hidden-reasoning access
+## 8. Limitations
 
-Next extensions:
+- small fixed task set (`24`) is useful for control but limited for broad capability claims
+- tools are deterministic mocks, not external production systems
+- guardrails are deterministic pattern/policy checks, not full privacy classifiers
+- traces are observable event traces only and do not expose hidden model reasoning
+- token/cost values are approximate estimates for relative profiling, not provider billing truth
 
-- generate and compare `results_lmstudio.csv` under fixed local setup
-- compare multiple local models/settings
-- add CI checks for backend-specific regressions
-- add stricter per-field output validators for LM-generated JSON actions
+## 9. Extensions
+
+- run repeated LM Studio and DeepSeek trials for variance envelopes
+- add stricter JSON action schema validation diagnostics
+- add backend-specific regression thresholds in CI
+- expand policy stress tests while keeping deterministic oracles
