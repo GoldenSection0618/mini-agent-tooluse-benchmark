@@ -1,64 +1,55 @@
-# Technical Memo: Three-Backend Benchmark Design
+# Technical Memo: Mini Agent Tool-Use Benchmark
 
 ## 1. Problem Definition
 
-This project is a small-scale controlled benchmark for profiling LLM agent tool-use efficiency, reliability, and guardrail failure cases. It is intentionally constrained to `24` fixed tasks so benchmark behavior is easy to inspect and reproduce.
+Final-answer accuracy alone hides critical agent process failures. In tool-use settings, an answer can look correct while the agent skips required tools, uses wrong arguments, violates multi-step order, or fails policy constraints.
 
-The core evaluation issue is that final-answer correctness alone is insufficient. An agent can still fail by:
+This repository is a proof-of-work benchmark harness for execution-level diagnostics. It focuses on:
 
-- skipping required tools,
-- using wrong tools or wrong argument values,
-- violating sequence constraints in multi-step tasks,
-- leaking policy-forbidden sensitive data.
+- tool-use protocol compliance,
+- runtime profiling,
+- guardrail failure analysis,
+- reproducible trace-based evaluation.
 
-The benchmark therefore evaluates both outcomes and process signals: oracle checks, structured traces, and compound failure flags.
+It is not a comprehensive benchmark of general LLM capability.
 
-## 2. Backend Design
+## 2. Experimental Setup
 
-The benchmark uses one unified runner and three interchangeable backends.
+Benchmark shape is fixed:
 
-### 2.1 rule_based
+- 24 tasks total
+- 8 `tool_use`, 8 `multi_step`, 8 `guardrail`
+- deterministic mock tools (`calculator_tool`, `file_lookup_tool`, `json_parser_tool`, `policy_checker_tool`)
+- deterministic guardrail checker
+- sequential task execution (no task-level parallelism)
 
-- deterministic sanity backend
-- no external API dependency
-- validates runner/evaluator/tracing correctness
-- provides stable regression control
+Backends:
 
-### 2.2 lmstudio
+- `rule_based` (deterministic sanity baseline)
+- `lmstudio` (local model through LM Studio REST)
+- `deepseek` (cloud model through OpenAI-compatible chat endpoint)
 
-- local real LLM backend via LM Studio REST endpoint (`/api/v1/chat`)
-- exercises real model behavior under local inference/runtime
-- preserves compatibility with offline/local workflows
+Comparable generation defaults:
 
-### 2.3 deepseek
+- `temperature=0`
+- `max_tokens=256`
 
-- cloud backend via DeepSeek OpenAI-compatible Chat Completions endpoint (`/chat/completions`)
-- uses `DEEPSEEK_API_KEY` from environment variables
-- reflects cloud API deployment conditions (network + provider-side effects)
+Outputs:
 
-## 3. Why Three Backends
+- task-level CSV results under `results/`
+- run metadata under `results/metadata/`
+- per-task traces under `traces/<backend>/`
+- backend and comparison figures/summaries under `figures/`
 
-Using one backend only makes diagnosis ambiguous.
+## 3. Metric Design
 
-- `rule_based` isolates harness logic and catches evaluator/tracing regressions quickly.
-- `lmstudio` tests realistic model-driven tool use while reducing external API variance.
-- `deepseek` tests a cloud API path closer to production-style deployment constraints.
+### Outcome metrics
 
-This backend split improves interpretability of failures without expanding task count.
-
-## 4. Controlled Evaluation Setup
-
-Task set remains fixed:
-
-- `8` tool_use
-- `8` multi_step
-- `8` guardrail
-
-Execution is strictly sequential: one task at a time, one trace file per task, one CSV row per task.
-
-Oracle success is decomposed into explicit checks:
-
+- `success`
 - `final_answer_correct`
+
+### Process metrics
+
 - `required_tools_called`
 - `tool_sequence_match`
 - `tool_argument_match`
@@ -66,90 +57,46 @@ Oracle success is decomposed into explicit checks:
 - `planning_success`
 - `format_correct`
 - `contains_excludes_match`
-- `guardrail_success`
 
-Failure reporting has two layers:
+### Efficiency metrics
 
-- `failure_type`: primary aggregate category
-- `failure_flags`: compound machine-readable error flags
+- `wall_clock_time_ms`
+- `request_latency_ms`
+- `tool_latency_ms`
+- token/cost estimates (`input_tokens`, `output_tokens`, `cost_usd`, provider usage fields)
 
-Trace events record observable execution only:
+### Safety metrics
 
-- `task_start`
-- `agent_decision`
-- `tool_call`
-- `tool_result`
-- `guardrail_check`
-- `evaluation`
-- `task_end`
+- `guardrail_violation`
+- `false_positive`
+- `false_negative`
+- `leaked_pii_types`
 
-The benchmark provides execution-level end-to-end explainability: each task can be traced from instruction input through agent action selection, tool calls, tool outputs, optional guardrail checks, oracle-level evaluation, and final failure classification. This is trace-level explainability, not hidden model reasoning disclosure.
+The design separates final-answer correctness from process correctness, which is essential for diagnosing tool-use behavior.
 
-## 5. Latency Interpretation
+## 4. Results
 
-Latency across backends is not a pure model-compute comparison.
+Snapshot from current canonical outputs:
 
-- `rule_based` latency is mainly local Python/tool execution overhead.
-- `lmstudio` latency includes local model runtime, loading state, and local hardware contention.
-- `deepseek` latency includes client-side network transport and provider-side queue/runtime effects.
+- `results/rule_based.csv`
+- `results/lmstudio.csv`
+- `results/deepseek.csv`
 
-Therefore, cross-backend latency is a system-level measurement, not an apples-to-apples model-speed metric.
+| Backend | Tasks | Success | Tool-use | Multi-step | Guardrail | Avg wall-clock ms | Avg request latency ms | Main failure types |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| rule_based | 24 | 100.00% | 100.00% | 100.00% | 100.00% | 0.0336 | 0.0000 | none:24 |
+| lmstudio | 24 | 0.00% | 0.00% | 0.00% | 0.00% | 27706.2538 | 27705.9102 | tool_misuse:12, hallucinated_result:12 |
+| deepseek | 24 | 8.33% | 25.00% | 0.00% | 0.00% | 7146.2047 | 7062.0774 | hallucinated_result:21, tool_misuse:1 |
 
-## 6. Experimental Results
+Interpretation:
 
-### 6.1 Rule-based snapshot (latest generated)
+- `rule_based` validates harness/evaluator/tracing integrity.
+- `lmstudio` and `deepseek` runs expose process failures dominated by missing/wrong tool usage and hallucinated completion without required tool flow.
+- Latency values are system-level end-to-end latency, not pure model compute time.
 
-From `results_rule_based.csv`:
+## 5. Failure Case Taxonomy
 
-- total tasks: `24`
-- overall success: `100%`
-- failure types: `none=24`
-- guardrail false positives: `0`
-- guardrail false negatives: `0`
-- average wall-clock latency by task type (ms):
-  - `tool_use`: `0.046825`
-  - `multi_step`: `0.0480375`
-  - `guardrail`: `0.034`
-- average tool latency by task type (ms):
-  - `tool_use`: `0.0162`
-  - `multi_step`: `0.0154`
-  - `guardrail`: `0.013`
-
-### 6.2 LM Studio snapshot (latest generated)
-
-From `results_lmstudio.csv`:
-
-- total tasks: `24`
-- overall success: `0%`
-- failure type distribution:
-  - `hallucinated_result`: `19`
-  - `tool_misuse`: `5`
-- average wall-clock latency by task type (ms):
-  - `tool_use`: `14020.7443875`
-  - `multi_step`: `8025.963875`
-  - `guardrail`: `8028.3472`
-
-This snapshot shows backend availability and instrumentation are working, while action JSON reliability is currently the main bottleneck for this model/runtime setup.
-
-### 6.3 DeepSeek snapshot (latest generated)
-
-From `results_deepseek.csv`:
-
-- total tasks: `24`
-- overall success: `20.83%` (`5/24`)
-- failure type distribution:
-  - `hallucinated_result`: `19`
-  - `none`: `5`
-- average wall-clock latency by task type (ms):
-  - `tool_use`: `4378.8642`
-  - `multi_step`: `5615.483925`
-  - `guardrail`: `5131.514625`
-
-## 7. Failure Taxonomy Across Backends
-
-The taxonomy is designed to preserve both top-level and compound signals.
-
-Primary categories (`failure_type`) include:
+Primary `failure_type` categories:
 
 - `planning_error`
 - `tool_misuse`
@@ -159,21 +106,30 @@ Primary categories (`failure_type`) include:
 - `policy_miss`
 - `format_error`
 
-Compound flags (`failure_flags`) can preserve secondary causes in a single task, e.g. required tool missing + answer mismatch + disallowed tool request.
+Compound `failure_flags` preserve secondary causes in the same task, e.g.:
 
-This is important for backend comparisons because different backends may fail for different combinations even when final-answer accuracy looks similar.
+- `required_tool_missing`
+- `tool_sequence_mismatch`
+- `tool_argument_mismatch`
+- `hallucinated_without_tool`
+- `llm_invalid_json`
 
-## 8. Limitations
+This dual view (primary class + compound flags) provides more diagnostic value than a single accuracy score.
 
-- small fixed task set (`24`) is useful for control but limited for broad capability claims
-- tools are deterministic mocks, not external production systems
-- guardrails are deterministic pattern/policy checks, not full privacy classifiers
-- traces are observable event traces only and do not expose hidden model reasoning
-- token/cost values are approximate estimates for relative profiling, not provider billing truth
+## 6. Limitations and Next Steps
 
-## 9. Extensions
+Current limitations:
 
-- run repeated LM Studio and DeepSeek trials for variance envelopes
-- add stricter JSON action schema validation diagnostics
-- add backend-specific regression thresholds in CI
-- expand policy stress tests while keeping deterministic oracles
+- small controlled task set (24 tasks)
+- mock tools instead of real external APIs
+- deterministic regex/pattern guardrail checker
+- token/cost values are approximate profiling signals
+- no repeated-run confidence intervals yet
+
+Practical next steps:
+
+- add repeated-run variance and confidence intervals by backend
+- introduce harder but still deterministic task variants
+- add optional real tool adapters behind the same evaluator contract
+- strengthen policy checker coverage (while keeping deterministic baseline checks)
+- expand backend matrix while preserving sequential reproducibility constraints
