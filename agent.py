@@ -240,6 +240,10 @@ def _run_rule_based_task(task: Dict[str, Any]) -> Dict[str, Any]:
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "cost_usd": round(cost_usd, 10),
+        "pricing_source": "heuristic_mock",
+        "prompt_tokens_provider": 0,
+        "completion_tokens_provider": 0,
+        "total_tokens_provider": 0,
         "notes": "; ".join(notes),
         "llm_decision_time_ms": 0.0,
         "request_latency_ms": 0.0,
@@ -302,6 +306,9 @@ class ToolCallingLLMAgent:
         step_counter = 0
         llm_decision_time_ms = 0.0
         request_latency_ms = 0.0
+        prompt_tokens_provider = 0
+        completion_tokens_provider = 0
+        total_tokens_provider = 0
 
         def emit(event_type: str, **kwargs: Any) -> None:
             nonlocal step_counter
@@ -403,6 +410,11 @@ class ToolCallingLLMAgent:
         action_resp = self.chat_client.chat(action_system_prompt, action_input)
         llm_decision_time_ms += float(action_resp.get("latency_ms", 0.0))
         request_latency_ms += float(action_resp.get("request_latency_ms", action_resp.get("latency_ms", 0.0)))
+        usage = action_resp.get("usage", {})
+        if isinstance(usage, dict):
+            prompt_tokens_provider += int(usage.get("prompt_tokens", 0) or 0)
+            completion_tokens_provider += int(usage.get("completion_tokens", 0) or 0)
+            total_tokens_provider += int(usage.get("total_tokens", 0) or 0)
         action_text = str(action_resp.get("content", ""))
         raw_model_output_previews.append(action_text[:500])
         internal_token_inputs.extend([action_system_prompt, action_input])
@@ -425,6 +437,11 @@ class ToolCallingLLMAgent:
                     repair_resp = self.chat_client.chat(repair_prompt, repair_input)
                     llm_decision_time_ms += float(repair_resp.get("latency_ms", 0.0))
                     request_latency_ms += float(repair_resp.get("request_latency_ms", repair_resp.get("latency_ms", 0.0)))
+                    usage = repair_resp.get("usage", {})
+                    if isinstance(usage, dict):
+                        prompt_tokens_provider += int(usage.get("prompt_tokens", 0) or 0)
+                        completion_tokens_provider += int(usage.get("completion_tokens", 0) or 0)
+                        total_tokens_provider += int(usage.get("total_tokens", 0) or 0)
                     action_text = str(repair_resp.get("content", ""))
                     raw_model_output_previews.append(action_text[:500])
                     internal_token_inputs.extend([repair_prompt, repair_input])
@@ -499,6 +516,11 @@ class ToolCallingLLMAgent:
                 final_resp = self.chat_client.chat(final_system_prompt, final_input)
                 llm_decision_time_ms += float(final_resp.get("latency_ms", 0.0))
                 request_latency_ms += float(final_resp.get("request_latency_ms", final_resp.get("latency_ms", 0.0)))
+                usage = final_resp.get("usage", {})
+                if isinstance(usage, dict):
+                    prompt_tokens_provider += int(usage.get("prompt_tokens", 0) or 0)
+                    completion_tokens_provider += int(usage.get("completion_tokens", 0) or 0)
+                    total_tokens_provider += int(usage.get("total_tokens", 0) or 0)
                 final_text = str(final_resp.get("content", ""))
                 raw_model_output_previews.append(final_text[:500])
                 internal_token_inputs.extend([final_system_prompt, final_input])
@@ -541,7 +563,23 @@ class ToolCallingLLMAgent:
 
         input_tokens = _count_tokens(" ".join(internal_token_inputs))
         output_tokens = _count_tokens(" ".join(raw_model_output_previews) + " " + final_answer)
-        cost_usd = input_tokens * self.input_cost_per_token_usd + output_tokens * self.output_cost_per_token_usd
+        if total_tokens_provider == 0 and (prompt_tokens_provider > 0 or completion_tokens_provider > 0):
+            total_tokens_provider = prompt_tokens_provider + completion_tokens_provider
+
+        if (prompt_tokens_provider > 0 or completion_tokens_provider > 0) and (
+            self.input_cost_per_token_usd > 0 or self.output_cost_per_token_usd > 0
+        ):
+            cost_usd = (
+                prompt_tokens_provider * self.input_cost_per_token_usd
+                + completion_tokens_provider * self.output_cost_per_token_usd
+            )
+            pricing_source = "provider_usage_with_configured_pricing"
+        elif (prompt_tokens_provider > 0 or completion_tokens_provider > 0):
+            cost_usd = 0.0
+            pricing_source = "provider_usage_no_pricing"
+        else:
+            cost_usd = input_tokens * self.input_cost_per_token_usd + output_tokens * self.output_cost_per_token_usd
+            pricing_source = "heuristic_mock"
 
         return {
             "final_answer": final_answer,
@@ -553,6 +591,10 @@ class ToolCallingLLMAgent:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "cost_usd": round(cost_usd, 10),
+            "pricing_source": pricing_source,
+            "prompt_tokens_provider": prompt_tokens_provider,
+            "completion_tokens_provider": completion_tokens_provider,
+            "total_tokens_provider": total_tokens_provider,
             "notes": "; ".join(notes),
             "llm_decision_time_ms": round(llm_decision_time_ms, 4),
             "request_latency_ms": round(request_latency_ms, 4),
