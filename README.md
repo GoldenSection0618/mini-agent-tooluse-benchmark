@@ -79,7 +79,7 @@ Success is decomposed into:
 
 ## Tracing
 
-Each task run produces a JSONL trace at `traces_{backend}/{task_id}.jsonl` by default (or custom `--trace-dir`).
+Each task run produces a JSONL trace at `traces/<backend>/<task_id>.jsonl` by default (or custom `--trace-dir`), for example `traces/rule_based/ms_01.jsonl`.
 
 Trace events include:
 
