@@ -37,7 +37,7 @@ curl http://localhost:1234/api/v1/chat \
 - Exactly `24` tasks in `tasks.json`
 - Deterministic local mock tools (`tools.py`)
 - Deterministic rule-based baseline (`RuleBasedAgent`)
-- Local LM Studio backend (`LocalLLMAgent` + `llm_clients.py`)
+- Local/cloud LLM backends through `ToolCallingLLMAgent` + `llm_clients.py`
 - Deterministic guardrail checker (`guardrails.py`)
 - Oracle evaluator with explicit sub-checks (`evaluator.py`)
 - Per-task JSONL traces (`tracing.py` + `traces*/`)
@@ -156,6 +156,8 @@ Typical outputs by backend:
 - `results_rule_based.csv` / `traces_rule_based/`
 - `results_lmstudio.csv` / `traces_lmstudio/`
 - `results_deepseek.csv` / `traces_deepseek/`
+
+`results.csv` is an ad-hoc/default output path when explicitly requested. For reproducible backend comparison, use `results_rule_based.csv`, `results_lmstudio.csv`, and `results_deepseek.csv`.
 
 Single-backend figures (written to the selected `--figures-dir`, e.g. `figures_rule_based/`):
 

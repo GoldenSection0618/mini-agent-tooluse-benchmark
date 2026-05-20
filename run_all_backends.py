@@ -52,6 +52,11 @@ def check_deepseek() -> Tuple[bool, str]:
 def main() -> None:
     py = sys.executable
     completed_results: List[str] = []
+    figure_dir_map = {
+        "results_rule_based.csv": "figures_rule_based",
+        "results_lmstudio.csv": "figures_lmstudio",
+        "results_deepseek.csv": "figures_deepseek",
+    }
 
     if run_cmd([py, "benchmark.py", "--agent", "rule_based"]):
         completed_results.append("results_rule_based.csv")
@@ -113,7 +118,8 @@ def main() -> None:
     existing_results = [f for f in completed_results if Path(f).exists()]
     if existing_results:
         single_backend = existing_results[0]
-        run_cmd([py, "analysis.py", "--input", single_backend, "--figures-dir", f"figures_{Path(single_backend).stem}"])
+        single_figures_dir = figure_dir_map.get(single_backend, f"figures_{Path(single_backend).stem}")
+        run_cmd([py, "analysis.py", "--input", single_backend, "--figures-dir", single_figures_dir])
 
     if len(existing_results) >= 2:
         run_cmd([py, "analysis.py", "--input", *existing_results, "--figures-dir", "figures_compare"])
