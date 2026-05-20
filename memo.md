@@ -104,27 +104,47 @@ Interpretation:
 - Latency values are system-level end-to-end latency, not pure model compute time.
 - Earlier runs without explicit tool schemas or guardrail record context should be treated as wrapper-contract diagnostics, not direct model capability measurements.
 
-### 4.1 Why are LLM success rates low?
+### 4.1 Figure-based result overview
+
+**Figure 1. Success rate by backend**
+
+![Success rate by backend](figures/compare/success_rate_by_backend.png)
+
+The rule-based backend is an oracle sanity check, not a competitive baseline. Its 100% score confirms that the task definitions, tools, evaluator, trace writer, and artifact generation path are executable under deterministic logic. The LLM backend scores should be interpreted as process-compliance measurements under the explicit tool-schema and task-context contract.
+
+**Figure 2. Success rate by backend and task type**
+
+![Success rate by backend and task type](figures/compare/success_rate_by_backend_and_task_type.png)
+
+DeepSeek reaches 100% success on `tool_use` tasks, but 0% on `multi_step` and `guardrail` tasks. LM Studio / Gemma reaches 25% on `tool_use` and 0% on the other task types. This split is the main evidence that the benchmark is stressing execution protocol compliance rather than only final-answer recall.
+
+**Figure 3. Failure type by backend**
+
+![Failure type by backend](figures/compare/failure_type_by_backend.png)
+
+Primary failure types provide the top-level classification used for aggregation. `none` marks successful tasks and should not be read as a failure mode. DeepSeek failures are dominated by `tool_misuse` and `answer_mismatch`, while LM Studio / Gemma failures are dominated by `tool_misuse`, `hallucinated_result`, and `wrong_calculation`.
+
+**Figure 4. Compound failure flags by backend**
+
+![Failure flags by backend](figures/compare/failure_flags_by_backend.png)
+
+Failure flags preserve multiple detected issues per task. This is where the stricter oracle is most useful: one task can simultaneously miss a required tool, use the wrong sequence, provide the wrong argument, and produce an incomplete final answer.
+
+**Figure 5. Latency by backend**
+
+![Latency by backend](figures/compare/latency_by_backend.png)
+
+Latency is end-to-end system latency. It includes local model runtime for LM Studio, network/provider effects for DeepSeek, and local Python execution for the rule-based sanity backend. The plot is useful for profiling the benchmark harness, but not for ranking pure model compute speed.
+
+### 4.2 Failure interpretation
 
 The low success rates are not caused by benchmark runtime failures. They reflect process-level tool-use failures captured by the oracle evaluator.
 
-For DeepSeek, the dominant pattern is not single-tool inability. It reaches 100% success on `tool_use` tasks, but 0% on `multi_step` and `guardrail` tasks. The main failure flags are `tool_argument_mismatch=11`, `tool_sequence_mismatch=8`, `required_tool_missing=7`, and `contains_required_text_missing=8`. This suggests the backend can follow simple tool calls but struggles with strict multi-step process compliance and task-specific guardrail output requirements.
+DeepSeek reaches 100% success on `tool_use` tasks but 0% on `multi_step` and `guardrail` tasks. Its main failure flags are `tool_argument_mismatch=11`, `tool_sequence_mismatch=8`, `required_tool_missing=7`, and `contains_required_text_missing=8`, indicating that simple tool calls are handled better than strict multi-step process compliance and task-specific guardrail output requirements.
 
-For LM Studio / Gemma, failure is more fundamental. Dominant flags include `llm_invalid_json=17`, `llm_empty_answer=22`, `format_mismatch=22`, `required_tool_missing=20`, `tool_sequence_mismatch=20`, and `tool_execution_failed=13`. This indicates instability in the JSON action protocol and tool-call formatting, not only reasoning failure.
+LM Studio / Gemma failures are more concentrated at the structured-output and tool-protocol interface level. Dominant flags include `llm_invalid_json=17`, `llm_empty_answer=22`, `format_mismatch=22`, `required_tool_missing=20`, `tool_sequence_mismatch=20`, and `tool_execution_failed=13`, indicating instability in the JSON action protocol and tool-call formatting.
 
-Therefore, this benchmark is best interpreted as an execution-level protocol stress test, not a general intelligence benchmark.
-
-### 4.2 Backend-level diagnosis
-
-- `deepseek`: high single-step tool-use pass rate, but weak sequence/argument compliance in multi-step and guardrail workflows.
-- `lmstudio`: frequent structured-output and protocol failures before higher-level task logic can be evaluated.
-- `rule_based`: oracle sanity backend with 100% pass, confirming evaluator/task/trace pipeline executability under deterministic logic.
-
-### 4.3 Representative failure cases
-
-- Correct-looking answers with missing required tools are classified as process failures, not successes.
-- Policy-clean guardrail outputs can still fail when required content constraints are missing.
-- JSON action formatting failures cascade into empty outputs, wrong tool calls, and downstream mismatches.
+These results are best read as an execution-level protocol stress test, not a general intelligence benchmark. Correct-looking answers can still fail when required tools are skipped, and policy-clean guardrail outputs can still fail when required content constraints are missing.
 
 ## 5. Failure Case Taxonomy
 

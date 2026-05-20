@@ -18,6 +18,28 @@ Low LLM success rates are expected in this benchmark: they expose process-level 
 
 Snapshot rates and latency values are sourced from `figures/compare/summary_by_backend.csv` and `figures/compare/summary_by_backend_and_task_type.csv`. Failure counts are sourced from `figures/compare/failure_type_by_backend.csv`.
 
+## Results Overview
+
+![Success rate by backend](figures/compare/success_rate_by_backend.png)
+
+The oracle sanity backend reaches 100%, confirming the task/evaluator pipeline is executable. LLM backend scores are lower because the oracle checks process compliance, not only final answers.
+
+![Success rate by backend and task type](figures/compare/success_rate_by_backend_and_task_type.png)
+
+DeepSeek succeeds on simple `tool_use` tasks but fails all `multi_step` and `guardrail` tasks under the current strict process oracle. LM Studio / Gemma has failures across all task types, with partial success only on single-tool tasks.
+
+![Failure type by backend](figures/compare/failure_type_by_backend.png)
+
+Primary failure types show the high-level category for each failed task. `none` means a successful task, not a failure mode.
+
+![Failure flags by backend](figures/compare/failure_flags_by_backend.png)
+
+Compound failure flags preserve secondary causes such as invalid JSON actions, missing required tools, wrong tool order, wrong arguments, and missing required text.
+
+![Latency by backend](figures/compare/latency_by_backend.png)
+
+Latency is end-to-end system latency. Local LM Studio, DeepSeek, and rule-based runs have different runtime sources and should not be read as pure model compute speed.
+
 ## Backends
 
 Three backends are supported:
