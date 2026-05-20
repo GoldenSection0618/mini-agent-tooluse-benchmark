@@ -141,6 +141,7 @@ DeepSeek run:
 export DEEPSEEK_API_KEY="your_api_key_here"
 
 python benchmark.py \
+  --config config.example.json \
   --agent deepseek \
   --base-url https://api.deepseek.com \
   --chat-endpoint /chat/completions \
