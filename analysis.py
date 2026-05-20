@@ -11,6 +11,12 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
+def _backend_role(agent_backend: str) -> str:
+    if str(agent_backend) == "rule_based":
+        return "oracle_sanity_check"
+    return "llm_backend"
+
+
 def _safe_parse_flags(raw: Any) -> tuple[list[str], bool]:
     if isinstance(raw, list):
         return [str(x) for x in raw], False
@@ -53,6 +59,7 @@ def _write_summary_artifacts(df: pd.DataFrame, fig_dir: Path) -> None:
         rows.append(
             {
                 "agent_backend": backend,
+                "backend_role": _backend_role(str(backend)),
                 "source_file": source_file,
                 "n_tasks": int(len(chunk)),
                 "success_rate_pct": _rate_pct(chunk["success"]),
@@ -82,13 +89,14 @@ def _write_summary_artifacts(df: pd.DataFrame, fig_dir: Path) -> None:
             }
         )
     summary_overall = pd.DataFrame(rows)
-    _write_csv(fig_dir / "summary_overall.csv", summary_overall, ["agent_backend", "source_file"])
+    _write_csv(fig_dir / "summary_overall.csv", summary_overall, ["backend_role", "agent_backend", "source_file"])
 
     by_task_rows = []
     for (backend, task_type), chunk in df.groupby(["agent_backend", "task_type"], dropna=False):
         by_task_rows.append(
             {
                 "agent_backend": backend,
+                "backend_role": _backend_role(str(backend)),
                 "task_type": task_type,
                 "n_tasks": int(len(chunk)),
                 "success_rate_pct": _rate_pct(chunk["success"]),
@@ -102,7 +110,7 @@ def _write_summary_artifacts(df: pd.DataFrame, fig_dir: Path) -> None:
             }
         )
     summary_by_task = pd.DataFrame(by_task_rows)
-    _write_csv(fig_dir / "summary_by_task_type.csv", summary_by_task, ["agent_backend", "task_type"])
+    _write_csv(fig_dir / "summary_by_task_type.csv", summary_by_task, ["backend_role", "agent_backend", "task_type"])
 
     failure_summary = (
         df.groupby(["agent_backend", "failure_type"], as_index=False)["task_id"]
@@ -139,8 +147,28 @@ def _write_summary_artifacts(df: pd.DataFrame, fig_dir: Path) -> None:
                 avg_tool_latency_ms=("tool_latency_ms", "mean"),
             )
         )
-        _write_csv(fig_dir / "summary_by_backend.csv", by_backend, ["agent_backend"])
-        _write_csv(fig_dir / "summary_by_backend_and_task_type.csv", summary_by_task, ["agent_backend", "task_type"])
+        by_backend["backend_role"] = by_backend["agent_backend"].map(_backend_role)
+        by_backend = by_backend[
+            [
+                "agent_backend",
+                "backend_role",
+                "n_tasks",
+                "success_rate_pct",
+                "final_answer_correct_rate_pct",
+                "avg_wall_clock_time_ms",
+                "avg_request_latency_ms",
+                "avg_tool_latency_ms",
+            ]
+        ]
+        _write_csv(fig_dir / "summary_by_backend.csv", by_backend, ["backend_role", "agent_backend"])
+        _write_csv(
+            fig_dir / "summary_by_backend_and_task_type.csv",
+            summary_by_task,
+            ["backend_role", "agent_backend", "task_type"],
+        )
+
+        backend_roles = by_backend[["agent_backend", "backend_role"]].drop_duplicates()
+        _write_csv(fig_dir / "backend_roles.csv", backend_roles, ["backend_role", "agent_backend"])
 
         failure_type_by_backend = (
             df.groupby(["agent_backend", "failure_type"], as_index=False)["task_id"]
