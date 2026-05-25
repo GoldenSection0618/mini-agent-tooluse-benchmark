@@ -1,10 +1,11 @@
 # Mini Agent Tool-Use Benchmark
 
-![Python](https://img.shields.io/badge/Python-3.11-blue)
-![Tasks](https://img.shields.io/badge/Tasks-24-informational)
-![Backends](https://img.shields.io/badge/Backends-3-informational)
-![Tracing](https://img.shields.io/badge/Tracing-JSONL-success)
-![Status](https://img.shields.io/badge/Status-Proof--of--Work-orange)
+![Benchmark](https://img.shields.io/badge/Benchmark-Tool--Use%20Diagnostics-2ea44f)
+![Tasks](https://img.shields.io/badge/Tasks-24%20%7C%208%2F8%2F8-blue)
+![Evaluation](https://img.shields.io/badge/Evaluation-Process%20Oracle-purple)
+![Tracing](https://img.shields.io/badge/Tracing-Per--Task%20JSONL-orange)
+![Execution](https://img.shields.io/badge/Execution-Sequential-lightgrey)
+![Backends](https://img.shields.io/badge/Backends-Rule--Based%20%7C%20LM%20Studio%20%7C%20DeepSeek-informational)
 
 This repository implements a small-scale benchmark for evaluating **LLM agent tool-use efficiency and failure cases** under controlled, reproducible conditions.
 
