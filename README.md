@@ -1,6 +1,14 @@
 # Mini Agent Tool-Use Benchmark
 
-This repository implements a small-scale benchmark for evaluating LLM agent tool-use efficiency and failure cases. It focuses on task success rate, wall-clock latency, tool-call latency, token/cost usage, invalid tool calls, retries, guardrail violations, and trace-based diagnostics.
+![Python](https://img.shields.io/badge/Python-3.11-blue)
+![Tasks](https://img.shields.io/badge/Tasks-24-informational)
+![Backends](https://img.shields.io/badge/Backends-3-informational)
+![Tracing](https://img.shields.io/badge/Tracing-JSONL-success)
+![Status](https://img.shields.io/badge/Status-Proof--of--Work-orange)
+
+This repository implements a small-scale benchmark for evaluating **LLM agent tool-use efficiency and failure cases** under controlled, reproducible conditions.
+
+It focuses on task success rate, wall-clock latency, tool-call latency, token/cost usage, invalid tool calls, retries, guardrail violations, and trace-based diagnostics. The goal is to evaluate not only whether the final answer is correct, but whether the agent follows the required tool-use process.
 
 ## Motivation
 
@@ -8,7 +16,27 @@ Final-answer matching alone can hide process failures. An answer may look correc
 
 Low LLM success rates are expected in this benchmark: they expose process-level tool-use failures such as invalid JSON actions, missing required tools, wrong tool order, wrong arguments, and safe-but-incomplete guardrail responses.
 
+## Contents
+
+- [Current Result Snapshot](#current-result-snapshot)
+- [Results Overview](#results-overview)
+- [Backends](#backends)
+- [Benchmark Design](#benchmark-design)
+- [Task Types](#task-types)
+- [Oracle Checks](#oracle-checks)
+- [Tracing](#tracing)
+- [Failure Taxonomy](#failure-taxonomy)
+- [Setup](#setup)
+- [Run Commands](#run-commands)
+- [Output Artifacts](#output-artifacts)
+- [Canonical Artifacts](#canonical-artifacts)
+- [Reproducibility Note](#reproducibility-note)
+- [Limitations](#limitations)
+
 ## Current Result Snapshot
+
+> **TL;DR.** Final-answer correctness can overestimate agent reliability.  
+> In the current run, DeepSeek solves simple single-tool tasks but fails strict multi-step and guardrail tasks under the process oracle. LM Studio / Gemma shows broader instability at the structured-output and tool-protocol layer. The rule-based backend is only an oracle sanity check confirming that the benchmark pipeline is executable.
 
 | Backend | Model | Tasks | Success | Tool-use | Multi-step | Guardrail | Avg wall-clock ms | Main failure modes |
 |---|---|---:|---:|---:|---:|---:|---:|---|
@@ -16,29 +44,31 @@ Low LLM success rates are expected in this benchmark: they expose process-level 
 | lmstudio | google/gemma-4-e4b | 24 | 8.33% | 25.00% | 0.00% | 0.00% | 25105.48 | tool_misuse:13, hallucinated_result:7, wrong_calculation:2 |
 | deepseek | deepseek-v4-flash | 24 | 33.33% | 100.00% | 0.00% | 0.00% | 1922.79 | tool_misuse:10, answer_mismatch:5, planning_error:1 |
 
-Snapshot rates and latency values are sourced from `figures/compare/summary_by_backend.csv` and `figures/compare/summary_by_backend_and_task_type.csv`. Failure counts are sourced from `figures/compare/failure_type_by_backend.csv`.
+Snapshot rates and latency values are sourced from [summary_by_backend.csv](figures/compare/summary_by_backend.csv) and [summary_by_backend_and_task_type.csv](figures/compare/summary_by_backend_and_task_type.csv). Failure counts are sourced from [failure_type_by_backend.csv](figures/compare/failure_type_by_backend.csv).
 
 ## Results Overview
 
+The figures below should be read as process-diagnostic evidence. They show where agents fail in the execution protocol: missing tools, wrong tool order, wrong arguments, invalid structured actions, incomplete guardrail responses, or final-answer mismatches.
+
 ![Success rate by backend](figures/compare/success_rate_by_backend.png)
 
-The oracle sanity backend reaches 100%, confirming the task/evaluator pipeline is executable. LLM backend scores are lower because the oracle checks process compliance, not only final answers.
+*Caption: The oracle sanity backend reaches 100%, confirming the task/evaluator pipeline is executable. LLM backend scores are lower because the oracle checks process compliance, not only final answers.*
 
 ![Success rate by backend and task type](figures/compare/success_rate_by_backend_and_task_type.png)
 
-DeepSeek succeeds on simple `tool_use` tasks but fails all `multi_step` and `guardrail` tasks under the current strict process oracle. LM Studio / Gemma has failures across all task types, with partial success only on single-tool tasks.
+*Caption: DeepSeek succeeds on simple `tool_use` tasks but fails all `multi_step` and `guardrail` tasks under the current strict process oracle. LM Studio / Gemma has failures across all task types, with partial success only on single-tool tasks.*
 
 ![Failure type by backend](figures/compare/failure_type_by_backend.png)
 
-Primary failure types show the high-level category for each failed task. `none` means a successful task, not a failure mode.
+*Caption: Primary failure types show the high-level category for each failed task. `none` means a successful task, not a failure mode.*
 
 ![Failure flags by backend](figures/compare/failure_flags_by_backend.png)
 
-Compound failure flags preserve secondary causes such as invalid JSON actions, missing required tools, wrong tool order, wrong arguments, and missing required text.
+*Caption: Compound failure flags preserve secondary causes such as invalid JSON actions, missing required tools, wrong tool order, wrong arguments, and missing required text.*
 
 ![Latency by backend](figures/compare/latency_by_backend.png)
 
-Latency is end-to-end system latency. Local LM Studio, DeepSeek, and rule-based runs have different runtime sources and should not be read as pure model compute speed.
+*Caption: Latency is end-to-end system latency. Local LM Studio, DeepSeek, and rule-based runs have different runtime sources and should not be read as pure model compute speed.*
 
 ## Backends
 
@@ -150,14 +180,18 @@ mamba install -n agent -y pandas matplotlib
 
 ## Run Commands
 
-Rule-based baseline:
+<details>
+<summary>Rule-based oracle sanity backend</summary>
 
 ```bash
 python benchmark.py --agent rule_based
 python analysis.py --input results/rule_based.csv --figures-dir figures/rule_based
 ```
 
-LM Studio run:
+</details>
+
+<details>
+<summary>LM Studio local LLM backend</summary>
 
 ```bash
 python benchmark.py \
@@ -171,7 +205,10 @@ python benchmark.py \
 python analysis.py --input results/lmstudio.csv --figures-dir figures/lmstudio
 ```
 
-DeepSeek run:
+</details>
+
+<details>
+<summary>DeepSeek cloud LLM backend</summary>
 
 ```bash
 export DEEPSEEK_API_KEY="your_api_key_here"
@@ -188,7 +225,10 @@ python benchmark.py \
 python analysis.py --input results/deepseek.csv --figures-dir figures/deepseek
 ```
 
-Comparison:
+</details>
+
+<details>
+<summary>Backend comparison figures</summary>
 
 ```bash
 python analysis.py \
@@ -196,23 +236,28 @@ python analysis.py \
   --figures-dir figures/compare
 ```
 
-Trace inspection helper:
+</details>
+
+<details>
+<summary>Trace inspection helper</summary>
 
 ```bash
 python inspect_trace.py traces/rule_based/ms_01.jsonl
 ```
 
+</details>
+
 ## Output Artifacts
 
-Typical outputs by backend:
+Each backend writes a task-level CSV result file and per-task JSONL traces:
 
-- `results/rule_based.csv` / `traces/rule_based/`
-- `results/lmstudio.csv` / `traces/lmstudio/`
-- `results/deepseek.csv` / `traces/deepseek/`
+- `rule_based`: `results/rule_based.csv` / `traces/rule_based/`
+- `lmstudio`: `results/lmstudio.csv` / `traces/lmstudio/`
+- `deepseek`: `results/deepseek.csv` / `traces/deepseek/`
 
-`results.csv` is an ad-hoc/default output path when explicitly requested. For reproducible backend comparison, use `results/rule_based.csv`, `results/lmstudio.csv`, and `results/deepseek.csv`.
+`results.csv` is an ad-hoc/default output path when explicitly requested. For reproducible backend comparison, use the backend-specific result files under `results/`.
 
-Single-backend figures (written to the selected `--figures-dir`, e.g. `figures/rule_based/`):
+Single-backend figures are written to the selected `--figures-dir`, for example `figures/rule_based/`, and include:
 
 - `latency_by_task_type.png`
 - `success_rate_by_task_type.png`
@@ -220,35 +265,27 @@ Single-backend figures (written to the selected `--figures-dir`, e.g. `figures/r
 - `failure_flags_distribution.png`
 - `oracle_metric_breakdown.png`
 
-Comparison mode may also generate:
-
-- `success_rate_by_backend.png`
-- `latency_by_backend.png`
-- `success_rate_by_backend_and_task_type.png`
-- `failure_type_by_backend.png`
-- `failure_flags_by_backend.png`
-- `tool_sequence_match_by_backend.png`
-- `tool_argument_match_by_backend.png`
+Comparison mode writes backend-level summaries and comparison figures under `figures/compare/`.
 
 ## Canonical Artifacts
 
 - Results:
-  - `results/rule_based.csv`
-  - `results/lmstudio.csv`
-  - `results/deepseek.csv`
+  - [`results/rule_based.csv`](results/rule_based.csv)
+  - [`results/lmstudio.csv`](results/lmstudio.csv)
+  - [`results/deepseek.csv`](results/deepseek.csv)
 - Run metadata:
-  - `results/metadata/rule_based.json`
-  - `results/metadata/lmstudio.json`
-  - `results/metadata/deepseek.json`
+  - [`results/metadata/rule_based.json`](results/metadata/rule_based.json)
+  - [`results/metadata/lmstudio.json`](results/metadata/lmstudio.json)
+  - [`results/metadata/deepseek.json`](results/metadata/deepseek.json)
 - Traces:
-  - `traces/rule_based/`
-  - `traces/lmstudio/`
-  - `traces/deepseek/`
+  - [`traces/rule_based/`](traces/rule_based/)
+  - [`traces/lmstudio/`](traces/lmstudio/)
+  - [`traces/deepseek/`](traces/deepseek/)
 - Figures and summaries:
-  - `figures/rule_based/`
-  - `figures/lmstudio/`
-  - `figures/deepseek/`
-  - `figures/compare/`
+  - [`figures/rule_based/`](figures/rule_based/)
+  - [`figures/lmstudio/`](figures/lmstudio/)
+  - [`figures/deepseek/`](figures/deepseek/)
+  - [`figures/compare/`](figures/compare/)
 
 ## Security Note
 
