@@ -266,7 +266,7 @@ Single-backend figures are written to the selected `--figures-dir`, for example 
 - `failure_flags_distribution.png`
 - `oracle_metric_breakdown.png`
 
-Comparison mode writes backend-level summaries and comparison figures under `figures/compare/`.
+Figures are exported as high-resolution PNG files for Markdown display. Comparison mode writes backend-level summaries, comparison figures, and the composite overview figure `benchmark_overview.png` under `figures/compare/`.
 
 ## Canonical Artifacts
 

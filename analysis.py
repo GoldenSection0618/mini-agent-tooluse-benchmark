@@ -7,8 +7,146 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 import pandas as pd
+
+
+BACKEND_ORDER = ["rule_based", "lmstudio", "deepseek"]
+TASK_TYPE_ORDER = ["tool_use", "multi_step", "guardrail"]
+
+BACKEND_LABELS = {
+    "rule_based": "Rule-based\noracle",
+    "lmstudio": "LM Studio\nGemma",
+    "deepseek": "DeepSeek",
+}
+
+TASK_TYPE_LABELS = {
+    "tool_use": "Tool use",
+    "multi_step": "Multi-step",
+    "guardrail": "Guardrail",
+}
+
+BACKEND_COLORS = {
+    "rule_based": "#8A8A8A",
+    "lmstudio": "#B65A5A",
+    "deepseek": "#2F5F8F",
+}
+
+TASK_TYPE_COLORS = {
+    "tool_use": "#4C78A8",
+    "multi_step": "#9FBAD6",
+    "guardrail": "#C99A5B",
+}
+
+METRIC_COLOR = "#4C78A8"
+NEUTRAL_DARK = "#333333"
+NEUTRAL_MID = "#737373"
+NEUTRAL_LIGHT = "#D9D9D9"
+
+
+def _set_publication_style() -> None:
+    mpl.rcParams.update(
+        {
+            "font.family": "sans-serif",
+            "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans", "sans-serif"],
+            "font.size": 7.5,
+            "axes.labelsize": 7.5,
+            "axes.titlesize": 8,
+            "xtick.labelsize": 7,
+            "ytick.labelsize": 7,
+            "legend.fontsize": 7,
+            "legend.title_fontsize": 7,
+            "axes.spines.right": False,
+            "axes.spines.top": False,
+            "axes.linewidth": 0.7,
+            "xtick.major.width": 0.7,
+            "ytick.major.width": 0.7,
+            "xtick.major.size": 2.6,
+            "ytick.major.size": 2.6,
+            "legend.frameon": False,
+            "figure.facecolor": "white",
+            "axes.facecolor": "white",
+            "savefig.facecolor": "white",
+        }
+    )
+
+
+def _ordered_values(values: Iterable[str], preferred: list[str]) -> list[str]:
+    present = [str(v) for v in values]
+    ordered = [v for v in preferred if v in present]
+    ordered.extend(sorted(v for v in present if v not in ordered))
+    return ordered
+
+
+def _backend_label(name: Any) -> str:
+    return BACKEND_LABELS.get(str(name), str(name))
+
+
+def _backend_label_short(name: Any) -> str:
+    labels = {
+        "rule_based": "Oracle",
+        "lmstudio": "Gemma",
+        "deepseek": "DeepSeek",
+    }
+    return labels.get(str(name), str(name))
+
+
+def _task_type_label(name: Any) -> str:
+    return TASK_TYPE_LABELS.get(str(name), str(name))
+
+
+def _metric_label(name: str) -> str:
+    return name.replace("_", " ")
+
+
+def _flag_label(name: str) -> str:
+    return name.replace("_", " ")
+
+
+def _save_figure(fig: mpl.figure.Figure, path: Path, dpi: int = 600) -> None:
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _panel_label(ax: mpl.axes.Axes, label: str) -> None:
+    ax.text(
+        -0.12,
+        1.06,
+        label,
+        transform=ax.transAxes,
+        fontsize=9,
+        fontweight="bold",
+        va="bottom",
+        ha="left",
+    )
+
+
+def _soften_axes(ax: mpl.axes.Axes, *, y_grid: bool = False, x_grid: bool = False) -> None:
+    ax.spines["left"].set_color(NEUTRAL_DARK)
+    ax.spines["bottom"].set_color(NEUTRAL_DARK)
+    ax.tick_params(colors=NEUTRAL_DARK)
+    if y_grid:
+        ax.grid(axis="y", color=NEUTRAL_LIGHT, linewidth=0.45, alpha=0.75)
+        ax.set_axisbelow(True)
+    if x_grid:
+        ax.grid(axis="x", color=NEUTRAL_LIGHT, linewidth=0.45, alpha=0.75)
+        ax.set_axisbelow(True)
+
+
+def _annotate_bars(ax: mpl.axes.Axes, bars: Iterable[Any], *, fmt: str = "{:.0f}") -> None:
+    for bar in bars:
+        height = float(bar.get_height())
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            height + 2,
+            fmt.format(height),
+            ha="center",
+            va="bottom",
+            fontsize=6.5,
+            color=NEUTRAL_DARK,
+        )
 
 
 def _backend_role(agent_backend: str) -> str:
@@ -188,51 +326,84 @@ def _write_summary_artifacts(df: pd.DataFrame, fig_dir: Path) -> None:
 
 def _plot_latency_by_task_type(df: pd.DataFrame, fig_dir: Path) -> None:
     latency = df.groupby("task_type", as_index=False)[["wall_clock_time_ms", "tool_latency_ms"]].mean()
-    x = range(len(latency))
-    width = 0.35
+    order = _ordered_values(latency["task_type"], TASK_TYPE_ORDER)
+    latency = latency.set_index("task_type").loc[order].reset_index()
+    y = list(range(len(latency)))
 
-    plt.figure(figsize=(8, 5))
-    plt.bar([i - width / 2 for i in x], latency["wall_clock_time_ms"], width=width, label="wall_clock_time_ms")
-    plt.bar([i + width / 2 for i in x], latency["tool_latency_ms"], width=width, label="tool_latency_ms")
-    plt.xticks(list(x), latency["task_type"])
-    plt.ylabel("Latency (ms)")
-    plt.title("Average Latency by Task Type")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(fig_dir / "latency_by_task_type.png", dpi=150)
-    plt.close()
+    fig, ax_wall = plt.subplots(figsize=(4.3, 2.5))
+    labels = [_task_type_label(t) for t in latency["task_type"]]
+    ax_wall.barh(y, latency["wall_clock_time_ms"], color="#748DB4", edgecolor="white", linewidth=0.4)
+    ax_wall.set_yticks(y, labels)
+    ax_wall.invert_yaxis()
+    ax_wall.set_xlabel("Wall-clock latency (ms)")
+    ax_wall.set_xlim(0, float(latency["wall_clock_time_ms"].max()) * 1.12)
+    _soften_axes(ax_wall, x_grid=True)
+
+    ax_tool = ax_wall.twiny()
+    tool_latency_us = latency["tool_latency_ms"] * 1000.0
+    for yi, value in zip(y, tool_latency_us):
+        ax_tool.hlines(yi, 0, value, color="#C99A5B", linewidth=1.0, zorder=3)
+        ax_tool.vlines(value, yi - 0.22, yi + 0.22, color="#C99A5B", linewidth=1.0, zorder=3)
+    ax_tool.set_xlim(0, max(float(tool_latency_us.max()) * 1.15, 1.0))
+    ax_tool.set_xlabel("Tool execution latency (us)", color="#8A642C")
+    ax_tool.tick_params(axis="x", colors="#8A642C")
+    ax_tool.tick_params(axis="y", left=False, labelleft=False)
+    ax_tool.spines["top"].set_visible(True)
+    ax_tool.spines["top"].set_color("#8A642C")
+    ax_tool.spines["bottom"].set_visible(False)
+    _save_figure(fig, fig_dir / "latency_by_task_type.png")
 
 
 def _plot_success_rate(df: pd.DataFrame, fig_dir: Path) -> None:
-    summary = df.groupby("task_type", as_index=False)[["success", "final_answer_correct"]].mean() * 100
-    summary["task_type"] = df.groupby("task_type", as_index=False)["task_type"].first()["task_type"]
-    x = range(len(summary))
+    summary = df.groupby("task_type", as_index=False)[["success", "final_answer_correct"]].mean()
+    summary[["success", "final_answer_correct"]] = summary[["success", "final_answer_correct"]] * 100
+    order = _ordered_values(summary["task_type"], TASK_TYPE_ORDER)
+    summary = summary.set_index("task_type").loc[order].reset_index()
+    x = list(range(len(summary)))
     width = 0.35
 
-    plt.figure(figsize=(8, 5))
-    plt.bar([i - width / 2 for i in x], summary["success"], width=width, label="success")
-    plt.bar([i + width / 2 for i in x], summary["final_answer_correct"], width=width, label="final_answer_correct")
-    plt.xticks(list(x), summary["task_type"])
-    plt.ylim(0, 100)
-    plt.ylabel("Rate (%)")
-    plt.title("Success and Final-Answer Correctness by Task Type")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(fig_dir / "success_rate_by_task_type.png", dpi=150)
-    plt.close()
+    fig, ax = plt.subplots(figsize=(3.6, 2.5))
+    ax.bar(
+        [i - width / 2 for i in x],
+        summary["success"],
+        width=width,
+        label="Strict success",
+        color="#2F5F8F",
+        edgecolor="white",
+        linewidth=0.4,
+    )
+    ax.bar(
+        [i + width / 2 for i in x],
+        summary["final_answer_correct"],
+        width=width,
+        label="Final answer",
+        color="#B7CBE2",
+        edgecolor="white",
+        linewidth=0.4,
+    )
+    ax.set_xticks(x, [_task_type_label(t) for t in summary["task_type"]])
+    ax.set_ylim(0, 105)
+    ax.set_ylabel("Rate (%)")
+    ax.legend(loc="upper right")
+    _soften_axes(ax, y_grid=True)
+    _save_figure(fig, fig_dir / "success_rate_by_task_type.png")
 
 
 def _plot_failure_distribution(df: pd.DataFrame, fig_dir: Path) -> None:
-    failure_counts = df["failure_type"].value_counts().sort_index()
+    failure_counts = df[df["failure_type"] != "none"]["failure_type"].value_counts().sort_values()
 
-    plt.figure(figsize=(9, 5))
-    plt.bar(failure_counts.index, failure_counts.values)
-    plt.ylabel("Count")
-    plt.title("Failure Type Distribution")
-    plt.xticks(rotation=20, ha="right")
-    plt.tight_layout()
-    plt.savefig(fig_dir / "failure_type_distribution.png", dpi=150)
-    plt.close()
+    fig, ax = plt.subplots(figsize=(3.8, 2.6))
+    if not failure_counts.empty:
+        ax.barh(
+            [_flag_label(str(i)) for i in failure_counts.index],
+            failure_counts.values,
+            color="#8E5D5D",
+            edgecolor="white",
+            linewidth=0.4,
+        )
+    ax.set_xlabel("Task count")
+    _soften_axes(ax, x_grid=True)
+    _save_figure(fig, fig_dir / "failure_type_distribution.png")
 
 
 def _plot_failure_flags_distribution(df: pd.DataFrame, fig_dir: Path) -> None:
@@ -241,16 +412,19 @@ def _plot_failure_flags_distribution(df: pd.DataFrame, fig_dir: Path) -> None:
         parsed = raw if isinstance(raw, list) else []
         flags.extend(parsed)
 
-    counts = pd.Series(flags).value_counts().sort_index() if flags else pd.Series(dtype="int64")
-    plt.figure(figsize=(10, 5))
+    counts = pd.Series(flags).value_counts().sort_values() if flags else pd.Series(dtype="int64")
+    fig, ax = plt.subplots(figsize=(4.2, 3.0))
     if not counts.empty:
-        plt.bar(counts.index, counts.values)
-        plt.xticks(rotation=30, ha="right")
-    plt.ylabel("Count")
-    plt.title("Failure Flags Distribution")
-    plt.tight_layout()
-    plt.savefig(fig_dir / "failure_flags_distribution.png", dpi=150)
-    plt.close()
+        ax.barh(
+            [_flag_label(str(i)) for i in counts.index],
+            counts.values,
+            color="#B65A5A",
+            edgecolor="white",
+            linewidth=0.4,
+        )
+    ax.set_xlabel("Flag count")
+    _soften_axes(ax, x_grid=True)
+    _save_figure(fig, fig_dir / "failure_flags_distribution.png")
 
 
 def _plot_oracle_metric_breakdown(df: pd.DataFrame, fig_dir: Path) -> None:
@@ -265,46 +439,69 @@ def _plot_oracle_metric_breakdown(df: pd.DataFrame, fig_dir: Path) -> None:
         "contains_excludes_match",
         "output_policy_clean",
     ]
-    rates = [(df[col].mean() * 100) for col in metrics]
+    rates = pd.Series({col: df[col].mean() * 100 for col in metrics}).sort_values()
 
-    plt.figure(figsize=(10, 5))
-    plt.bar(metrics, rates)
-    plt.ylim(0, 100)
-    plt.ylabel("Rate (%)")
-    plt.title("Oracle Metric Breakdown")
-    plt.xticks(rotation=25, ha="right")
-    plt.tight_layout()
-    plt.savefig(fig_dir / "oracle_metric_breakdown.png", dpi=150)
-    plt.close()
+    fig, ax = plt.subplots(figsize=(4.4, 3.0))
+    ax.barh([_metric_label(m) for m in rates.index], rates.values, color=METRIC_COLOR, edgecolor="white", linewidth=0.4)
+    ax.set_xlim(0, 105)
+    ax.set_xlabel("Pass rate (%)")
+    _soften_axes(ax, x_grid=True)
+    _save_figure(fig, fig_dir / "oracle_metric_breakdown.png")
 
 
 def _plot_success_rate_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
     summary = df.groupby("agent_backend", as_index=False)["success"].mean()
     summary["success_rate"] = summary["success"] * 100
-    plt.figure(figsize=(7, 5))
-    plt.bar(summary["agent_backend"], summary["success_rate"])
-    plt.ylim(0, 100)
-    plt.ylabel("Success Rate (%)")
-    plt.title("Success Rate by Backend")
-    plt.tight_layout()
-    plt.savefig(fig_dir / "success_rate_by_backend.png", dpi=150)
-    plt.close()
+    order = _ordered_values(summary["agent_backend"], BACKEND_ORDER)
+    summary = summary.set_index("agent_backend").loc[order].reset_index()
+    colors = [BACKEND_COLORS.get(b, NEUTRAL_MID) for b in summary["agent_backend"]]
+
+    fig, ax = plt.subplots(figsize=(3.2, 2.5))
+    bars = ax.bar(
+        [_backend_label(b) for b in summary["agent_backend"]],
+        summary["success_rate"],
+        color=colors,
+        edgecolor="white",
+        linewidth=0.4,
+    )
+    ax.set_ylim(0, 105)
+    ax.set_ylabel("Strict success (%)")
+    _annotate_bars(ax, bars)
+    _soften_axes(ax, y_grid=True)
+    _save_figure(fig, fig_dir / "success_rate_by_backend.png")
 
 
 def _plot_latency_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
     summary = df.groupby("agent_backend", as_index=False)[["wall_clock_time_ms", "tool_latency_ms"]].mean()
-    x = range(len(summary))
-    width = 0.35
-    plt.figure(figsize=(8, 5))
-    plt.bar([i - width / 2 for i in x], summary["wall_clock_time_ms"], width=width, label="wall_clock_time_ms")
-    plt.bar([i + width / 2 for i in x], summary["tool_latency_ms"], width=width, label="tool_latency_ms")
-    plt.xticks(list(x), summary["agent_backend"])
-    plt.ylabel("Latency (ms)")
-    plt.title("Latency by Backend")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(fig_dir / "latency_by_backend.png", dpi=150)
-    plt.close()
+    order = _ordered_values(summary["agent_backend"], BACKEND_ORDER)
+    summary = summary.set_index("agent_backend").loc[order].reset_index()
+    y = list(range(len(summary)))
+
+    fig, ax_wall = plt.subplots(figsize=(4.3, 2.5))
+    labels = [_backend_label_short(b) for b in summary["agent_backend"]]
+    ax_wall.barh(y, summary["wall_clock_time_ms"], color="#748DB4", edgecolor="white", linewidth=0.4)
+    ax_wall.set_yticks(y, labels)
+    ax_wall.invert_yaxis()
+    ax_wall.set_xscale("log")
+    ax_wall.set_xlabel("Wall-clock latency (ms)")
+    positive_wall = summary.loc[summary["wall_clock_time_ms"] > 0, "wall_clock_time_ms"]
+    if not positive_wall.empty:
+        ax_wall.set_xlim(float(positive_wall.min()) * 0.6, float(positive_wall.max()) * 1.8)
+    _soften_axes(ax_wall, x_grid=True)
+
+    ax_tool = ax_wall.twiny()
+    tool_latency_us = summary["tool_latency_ms"] * 1000.0
+    for yi, value in zip(y, tool_latency_us):
+        ax_tool.hlines(yi, 0, value, color="#C99A5B", linewidth=1.0, zorder=3)
+        ax_tool.vlines(value, yi - 0.22, yi + 0.22, color="#C99A5B", linewidth=1.0, zorder=3)
+    ax_tool.set_xlim(0, max(float(tool_latency_us.max()) * 1.15, 1.0))
+    ax_tool.set_xlabel("Tool execution latency (us)", color="#8A642C")
+    ax_tool.tick_params(axis="x", colors="#8A642C")
+    ax_tool.tick_params(axis="y", left=False, labelleft=False)
+    ax_tool.spines["top"].set_visible(True)
+    ax_tool.spines["top"].set_color("#8A642C")
+    ax_tool.spines["bottom"].set_visible(False)
+    _save_figure(fig, fig_dir / "latency_by_backend.png")
 
 
 def _plot_success_rate_by_backend_and_task_type(df: pd.DataFrame, fig_dir: Path) -> None:
@@ -312,29 +509,58 @@ def _plot_success_rate_by_backend_and_task_type(df: pd.DataFrame, fig_dir: Path)
         df.pivot_table(index="agent_backend", columns="task_type", values="success", aggfunc="mean", fill_value=0.0)
         * 100
     )
-    ax = pivot.plot(kind="bar", figsize=(9, 5))
-    ax.set_ylim(0, 100)
-    ax.set_ylabel("Success Rate (%)")
-    ax.set_title("Success Rate by Backend and Task Type")
-    ax.tick_params(axis="x", rotation=0)
-    ax.legend(title="task_type")
-    plt.tight_layout()
-    plt.savefig(fig_dir / "success_rate_by_backend_and_task_type.png", dpi=150)
-    plt.close()
+    backend_order = _ordered_values(pivot.index, BACKEND_ORDER)
+    task_order = _ordered_values(pivot.columns, TASK_TYPE_ORDER)
+    pivot = pivot.loc[backend_order, task_order]
+    fig, ax = plt.subplots(figsize=(4.2, 2.8))
+    y = list(range(len(pivot.index)))
+    height = 0.22
+    offsets = [(-height), 0, height]
+    for idx, task_type in enumerate(pivot.columns):
+        offset = offsets[idx] if idx < len(offsets) else (idx - len(pivot.columns) / 2) * height
+        ax.barh(
+            [i + offset for i in y],
+            pivot[task_type],
+            height=height,
+            label=_task_type_label(task_type),
+            color=TASK_TYPE_COLORS.get(task_type, NEUTRAL_MID),
+            edgecolor="white",
+            linewidth=0.4,
+        )
+    ax.set_yticks(y, [_backend_label_short(b) for b in pivot.index])
+    ax.invert_yaxis()
+    ax.set_xlim(0, 105)
+    ax.set_xlabel("Strict success (%)")
+    ax.legend(
+        loc="lower left",
+        bbox_to_anchor=(0, 1.02),
+        ncol=3,
+        handlelength=1.2,
+        columnspacing=0.9,
+    )
+    _soften_axes(ax, x_grid=True)
+    _save_figure(fig, fig_dir / "success_rate_by_backend_and_task_type.png")
 
 
 def _plot_failure_type_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
-    pivot = (
-        df.pivot_table(index="agent_backend", columns="failure_type", values="task_id", aggfunc="count", fill_value=0)
-    )
-    ax = pivot.plot(kind="bar", figsize=(10, 5))
-    ax.set_ylabel("Count")
-    ax.set_title("Failure Type by Backend")
-    ax.tick_params(axis="x", rotation=0)
-    ax.legend(title="failure_type", bbox_to_anchor=(1.02, 1), loc="upper left")
-    plt.tight_layout()
-    plt.savefig(fig_dir / "failure_type_by_backend.png", dpi=150)
-    plt.close()
+    with mpl.rc_context(mpl.rcParamsDefault):
+        pivot = (
+            df.pivot_table(
+                index="agent_backend",
+                columns="failure_type",
+                values="task_id",
+                aggfunc="count",
+                fill_value=0,
+            )
+        )
+        ax = pivot.plot(kind="bar", figsize=(10, 5))
+        ax.set_ylabel("Count")
+        ax.set_title("Failure Type by Backend")
+        ax.tick_params(axis="x", rotation=0)
+        ax.legend(title="failure_type", bbox_to_anchor=(1.02, 1), loc="upper left")
+        plt.tight_layout()
+        plt.savefig(fig_dir / "failure_type_by_backend.png", dpi=150)
+        plt.close()
 
 
 def _plot_failure_flags_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
@@ -346,46 +572,179 @@ def _plot_failure_flags_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
     if not rows:
         return
     flags_df = pd.DataFrame(rows)
-    pivot = (
-        flags_df.pivot_table(index="agent_backend", columns="failure_flag", values="agent_backend", aggfunc="count", fill_value=0)
-    )
-    ax = pivot.plot(kind="bar", figsize=(11, 5))
-    ax.set_ylabel("Count")
-    ax.set_title("Failure Flags by Backend")
-    ax.tick_params(axis="x", rotation=0)
-    ax.legend(title="failure_flag", bbox_to_anchor=(1.02, 1), loc="upper left")
-    plt.tight_layout()
-    plt.savefig(fig_dir / "failure_flags_by_backend.png", dpi=150)
-    plt.close()
+    with mpl.rc_context(mpl.rcParamsDefault):
+        pivot = flags_df.groupby(["agent_backend", "failure_flag"]).size().unstack(fill_value=0)
+        ax = pivot.plot(kind="bar", figsize=(11, 5))
+        ax.set_ylabel("Count")
+        ax.set_title("Failure Flags by Backend")
+        ax.tick_params(axis="x", rotation=0)
+        ax.legend(title="failure_flag", bbox_to_anchor=(1.02, 1), loc="upper left")
+        plt.tight_layout()
+        plt.savefig(fig_dir / "failure_flags_by_backend.png", dpi=150)
+        plt.close()
 
 
 def _plot_tool_match_by_backend(df: pd.DataFrame, fig_dir: Path) -> None:
-    summary = (
-        df.groupby("agent_backend", as_index=False)[["tool_sequence_match", "tool_argument_match"]].mean() * 100
+    summary = df.groupby("agent_backend", as_index=False)[["tool_sequence_match", "tool_argument_match"]].mean()
+    summary[["tool_sequence_match", "tool_argument_match"]] = (
+        summary[["tool_sequence_match", "tool_argument_match"]] * 100
     )
-    summary["agent_backend"] = df.groupby("agent_backend", as_index=False)["agent_backend"].first()["agent_backend"]
-    x = range(len(summary))
+    order = _ordered_values(summary["agent_backend"], BACKEND_ORDER)
+    summary = summary.set_index("agent_backend").loc[order].reset_index()
+    x = list(range(len(summary)))
     width = 0.35
-    plt.figure(figsize=(9, 5))
-    plt.bar([i - width / 2 for i in x], summary["tool_sequence_match"], width=width, label="tool_sequence_match")
-    plt.bar([i + width / 2 for i in x], summary["tool_argument_match"], width=width, label="tool_argument_match")
-    plt.xticks(list(x), summary["agent_backend"])
-    plt.ylim(0, 100)
-    plt.ylabel("Rate (%)")
-    plt.title("Tool Match Rates by Backend")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(fig_dir / "tool_sequence_match_by_backend.png", dpi=150)
-    plt.close()
 
-    plt.figure(figsize=(7, 5))
-    plt.bar(summary["agent_backend"], summary["tool_argument_match"])
-    plt.ylim(0, 100)
-    plt.ylabel("Rate (%)")
-    plt.title("Tool Argument Match by Backend")
-    plt.tight_layout()
-    plt.savefig(fig_dir / "tool_argument_match_by_backend.png", dpi=150)
-    plt.close()
+    fig, ax = plt.subplots(figsize=(3.7, 2.5))
+    ax.bar(
+        [i - width / 2 for i in x],
+        summary["tool_sequence_match"],
+        width=width,
+        label="Sequence",
+        color="#2F5F8F",
+        edgecolor="white",
+        linewidth=0.4,
+    )
+    ax.bar(
+        [i + width / 2 for i in x],
+        summary["tool_argument_match"],
+        width=width,
+        label="Arguments",
+        color="#9FBAD6",
+        edgecolor="white",
+        linewidth=0.4,
+    )
+    ax.set_xticks(x, [_backend_label(b) for b in summary["agent_backend"]])
+    ax.set_ylim(0, 105)
+    ax.set_ylabel("Pass rate (%)")
+    ax.legend(loc="upper right")
+    _soften_axes(ax, y_grid=True)
+    _save_figure(fig, fig_dir / "tool_sequence_match_by_backend.png")
+
+    fig, ax = plt.subplots(figsize=(3.2, 2.5))
+    bars = ax.bar(
+        [_backend_label(b) for b in summary["agent_backend"]],
+        summary["tool_argument_match"],
+        color=[BACKEND_COLORS.get(b, NEUTRAL_MID) for b in summary["agent_backend"]],
+        edgecolor="white",
+        linewidth=0.4,
+    )
+    ax.set_ylim(0, 105)
+    ax.set_ylabel("Argument match (%)")
+    _annotate_bars(ax, bars)
+    _soften_axes(ax, y_grid=True)
+    _save_figure(fig, fig_dir / "tool_argument_match_by_backend.png")
+
+
+def _plot_benchmark_overview(df: pd.DataFrame, fig_dir: Path) -> None:
+    backend_order = _ordered_values(df["agent_backend"].unique(), BACKEND_ORDER)
+    task_order = _ordered_values(df["task_type"].unique(), TASK_TYPE_ORDER)
+
+    fig = plt.figure(figsize=(7.4, 5.8), constrained_layout=True)
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.04, 1.0], height_ratios=[0.92, 1.2])
+
+    ax_a = fig.add_subplot(gs[0, 0])
+    success_task = (
+        df.pivot_table(index="agent_backend", columns="task_type", values="success", aggfunc="mean", fill_value=0.0)
+        * 100
+    ).reindex(index=backend_order, columns=task_order)
+    im = ax_a.imshow(success_task.values, vmin=0, vmax=100, cmap="Blues", aspect="auto")
+    ax_a.set_xticks(range(len(task_order)), [_task_type_label(t) for t in task_order], rotation=25, ha="right")
+    ax_a.set_yticks(range(len(backend_order)), [_backend_label_short(b) for b in backend_order])
+    for row_idx, backend in enumerate(success_task.index):
+        for col_idx, task_type in enumerate(success_task.columns):
+            value = success_task.loc[backend, task_type]
+            color = "white" if value >= 70 else NEUTRAL_DARK
+            ax_a.text(col_idx, row_idx, f"{value:.0f}", ha="center", va="center", fontsize=7, color=color)
+    ax_a.tick_params(length=0)
+    for spine in ax_a.spines.values():
+        spine.set_visible(False)
+    cbar = fig.colorbar(im, ax=ax_a, fraction=0.046, pad=0.02)
+    cbar.set_label("Strict success (%)", fontsize=7)
+    cbar.ax.tick_params(labelsize=6.5, length=2)
+    _panel_label(ax_a, "a")
+
+    ax_b = fig.add_subplot(gs[0, 1])
+    metrics = [
+        "final_answer_correct",
+        "required_tools_called",
+        "tool_sequence_match",
+        "tool_argument_match",
+        "format_correct",
+        "output_policy_clean",
+    ]
+    metric_rates = pd.Series({m: df[m].mean() * 100 for m in metrics}).sort_values()
+    ax_b.barh(
+        [_metric_label(m) for m in metric_rates.index],
+        metric_rates.values,
+        color=METRIC_COLOR,
+        edgecolor="white",
+        linewidth=0.4,
+    )
+    ax_b.set_xlim(0, 105)
+    ax_b.set_xlabel("Pass rate (%)")
+    _soften_axes(ax_b, x_grid=True)
+    _panel_label(ax_b, "b")
+
+    ax_c = fig.add_subplot(gs[1, 0])
+    rows = []
+    for _, row in df.iterrows():
+        for flag in row.get("failure_flags_list", []):
+            rows.append({"agent_backend": row["agent_backend"], "failure_flag": flag})
+    if rows:
+        flags_df = pd.DataFrame(rows)
+        pivot = flags_df.groupby(["failure_flag", "agent_backend"]).size().unstack(fill_value=0)
+        pivot = pivot.reindex(columns=backend_order, fill_value=0)
+        pivot = pivot.loc[pivot.sum(axis=1).sort_values().tail(8).index]
+        pivot.plot(
+            kind="barh",
+            ax=ax_c,
+            color=[BACKEND_COLORS.get(b, NEUTRAL_MID) for b in pivot.columns],
+            edgecolor="white",
+            linewidth=0.4,
+        )
+        ax_c.set_yticklabels([_flag_label(str(t.get_text())) for t in ax_c.get_yticklabels()])
+    ax_c.set_xlabel("Flag count")
+    ax_c.set_ylabel("")
+    legend_backends = [b for b in backend_order if b in {"lmstudio", "deepseek"}]
+    ax_c.legend(
+        handles=[Patch(facecolor=BACKEND_COLORS.get(b, NEUTRAL_MID), label=_backend_label(b).replace("\n", " ")) for b in legend_backends],
+        loc="lower left",
+        bbox_to_anchor=(0, 1.02),
+        ncol=2,
+        handlelength=1.2,
+        columnspacing=0.9,
+    )
+    _soften_axes(ax_c, x_grid=True)
+    _panel_label(ax_c, "c")
+
+    ax_d = fig.add_subplot(gs[1, 1])
+    latency = df.groupby("agent_backend")[["wall_clock_time_ms", "tool_latency_ms"]].mean().reindex(backend_order)
+    y = list(range(len(latency.index)))
+    ax_d.barh(y, latency["wall_clock_time_ms"], color="#748DB4", edgecolor="white", linewidth=0.4)
+    ax_d.set_yticks(y, [_backend_label_short(b) for b in latency.index])
+    ax_d.invert_yaxis()
+    ax_d.set_xscale("log")
+    positive_wall = latency.loc[latency["wall_clock_time_ms"] > 0, "wall_clock_time_ms"]
+    if not positive_wall.empty:
+        ax_d.set_xlim(float(positive_wall.min()) * 0.6, float(positive_wall.max()) * 1.8)
+    ax_d.set_xlabel("Wall-clock latency (ms)")
+    _soften_axes(ax_d, x_grid=True)
+
+    ax_d_tool = ax_d.twiny()
+    tool_latency_us = latency["tool_latency_ms"] * 1000.0
+    for yi, value in zip(y, tool_latency_us):
+        ax_d_tool.hlines(yi, 0, value, color="#C99A5B", linewidth=1.0, zorder=3)
+        ax_d_tool.vlines(value, yi - 0.22, yi + 0.22, color="#C99A5B", linewidth=1.0, zorder=3)
+    ax_d_tool.set_xlim(0, max(float(tool_latency_us.max()) * 1.15, 1.0))
+    ax_d_tool.set_xlabel("Tool execution latency (us)", color="#8A642C")
+    ax_d_tool.tick_params(axis="x", colors="#8A642C", labelsize=6.5)
+    ax_d_tool.tick_params(axis="y", left=False, labelleft=False)
+    ax_d_tool.spines["top"].set_visible(True)
+    ax_d_tool.spines["top"].set_color("#8A642C")
+    ax_d_tool.spines["bottom"].set_visible(False)
+    _panel_label(ax_d, "d")
+
+    _save_figure(fig, fig_dir / "benchmark_overview.png")
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -396,6 +755,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    _set_publication_style()
     parser = _build_arg_parser()
     args = parser.parse_args()
     input_paths = args.input
@@ -453,6 +813,7 @@ def main() -> None:
     _plot_failure_flags_distribution(df, fig_dir)
     _plot_oracle_metric_breakdown(df, fig_dir)
     if len(input_paths) > 1:
+        _plot_benchmark_overview(df, fig_dir)
         _plot_success_rate_by_backend(df, fig_dir)
         _plot_latency_by_backend(df, fig_dir)
         _plot_success_rate_by_backend_and_task_type(df, fig_dir)

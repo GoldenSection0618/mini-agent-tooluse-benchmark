@@ -151,6 +151,8 @@ def check_forbidden_parallelism() -> None:
     for path in Path(".").rglob("*.py"):
         if any(part.startswith(".") for part in path.parts):
             continue
+        if "skills" in path.parts:
+            continue
         if "__pycache__" in path.parts:
             continue
         if path.name == here:

@@ -39,7 +39,7 @@ Outputs:
 - task-level CSV results under `results/`
 - run metadata under `results/metadata/`
 - per-task traces under `traces/<backend>/`
-- backend and comparison figures/summaries under `figures/`
+- backend and comparison figures/summaries under `figures/`, with figures exported as PNG for Markdown display
 - canonical examples include `traces/rule_based/` and `figures/compare/`
 
 The current results measure LLM backends under an explicit tool-schema and task-context contract:
